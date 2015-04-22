@@ -1,14 +1,11 @@
-import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileReader;
 import java.io.IOException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Hashtable;
@@ -119,7 +116,10 @@ public class RequestWorker extends Thread {
 						respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
 								"Welcome to " + Utils.SERVER_NAME + "!",
 								
-								"<div class=\"col-md-12\"><p class=\"text-center\">Made by Hayden Schiff and Shir Maimon.</p></div>"
+								""
+								+ "<div class=\"col-md-12\">"
+								+ "<p class=\"text-center\">Made by Hayden Schiff and Shir Maimon</p>"
+								+ "</div>"
 								+ "<div class=\"col-sm-4\">"
 								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
 								+ "</div>"

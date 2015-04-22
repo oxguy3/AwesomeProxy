@@ -21,8 +21,10 @@ public class Utils {
 	final static boolean LOG_REQUEST_CLIENT_CONNECTIONS = true; // log requests w/client? (only if LOG_REQUEST_MESSAGES)
 	final static boolean LOG_REQUEST_REMOTE_CONNECTIONS = true; // log requests w/remote? (only if LOG_REQUEST_MESSAGES)
 	
-	
+	// how many bytes of a file should the file server read at a time?
 	final static int FILE_BUFFER_SIZE = 1024;
+	
+	// some strings that get used a lot, for convenience
 	final static String HTTP_VERSION = "HTTP/1.1";
 	final static String CRLF = "\r\n";
 	final static String LF = "\n";
