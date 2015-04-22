@@ -21,17 +21,17 @@ public class ProxyServer extends Thread {
 	volatile static boolean isProxyActive;
 	
 	
-	Socket server; // connection to client
-	BufferedReader buff; // client -> proxy
-	DataOutputStream dos; // proxy -> client
+	Socket clientSocket; // connection to client
+	BufferedReader clientIn; // client -> proxy
+	DataOutputStream clientOut; // proxy -> client
 	
-	Socket client; // connection to remote
-	DataInputStream remoteDis; // remote -> proxy
-	DataOutputStream remoteDos; // proxy -> remote
+	Socket remoteSocket; // connection to remote
+	DataInputStream remoteIn; // remote -> proxy
+	DataOutputStream remoteOut; // proxy -> remote
 	Hashtable<String,String> remoteHeaders; // headers received from remote
 	
 	public ProxyServer(Socket srv) {
-		server = srv;
+		clientSocket = srv;
 	}
 
 	public static void main(String[] args) {
@@ -42,13 +42,14 @@ public class ProxyServer extends Thread {
 			port = Integer.parseInt(portStr);
 		}
 		
+		// start listening for connections
 		ServerSocket srvSock;
-		
 		try {
 			srvSock = new ServerSocket(port);
 			System.out.println("Listening for connections on port " + Integer.toString(port) + "...");
 			
 		} catch (IOException e) {
+			System.err.println("Failed to bind socket");
 			e.printStackTrace();
 			return;
 		}
@@ -62,12 +63,18 @@ public class ProxyServer extends Thread {
 				Socket server = srvSock.accept();
 				if (!isAlive) break;
 
-				System.out.println("Received new connection...");
+				//System.out.println("Received new connection...");
 				ProxyServer worker = new ProxyServer(server);
 				worker.start();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
+		}
+		
+		try {
+			srvSock.close();
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 	}
 	
@@ -75,33 +82,35 @@ public class ProxyServer extends Thread {
 		try {
 			
 			// reader for client->proxy data
-			buff = new BufferedReader(new InputStreamReader(server.getInputStream(), Charset.forName("UTF-8")));
+			clientIn = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), Charset.forName("UTF-8")));
 			
 			// writer for proxy->client data
-			dos = new DataOutputStream(server.getOutputStream());
+			clientOut = new DataOutputStream(clientSocket.getOutputStream());
 			
 			
 			ArrayList<String> lines = new ArrayList<String>();
 			
 			String line;
-			while ((line = buff.readLine()) != null) {
+			while ((line = clientIn.readLine()) != null) {
 				
 				// break after two lines
 				if (line.equals("")) break;
 				
-				System.out.println("C->P | "+line);
+				//System.out.println("C->P | "+line);
 				lines.add(line);
 			}
 			
 			// ignore empty requests
 			if (lines.size() < 1) {
 				System.out.println("Closing empty request...");
-				server.close();
+				clientSocket.close();
 				return;
 			}
 			
 			// the first line of the request
 			String request = lines.get(0);
+			
+			System.out.println("> " + request);
 			
 			String[] requestArgs = request.split(" ");
 			if (requestArgs.length != 3) {
@@ -122,7 +131,7 @@ public class ProxyServer extends Thread {
 			String requestUrl = requestArgs[1]; // the URI that our client wants to access
 			
 			
-			// handle local (i.e. non-remote) addresses
+			// handle internal local addresses
 			if (requestUrl.startsWith("/")) {
 				String[] requestParams = requestUrl.split("/");
 				
@@ -214,10 +223,10 @@ public class ProxyServer extends Thread {
 			
 			
 			
-			client = new Socket(hostname, remotePort);
+			remoteSocket = new Socket(hostname, remotePort);
 			System.out.println("Connecting to remote server...");
-			remoteDos = new DataOutputStream(client.getOutputStream());
-			remoteDis = new DataInputStream(client.getInputStream());
+			remoteOut = new DataOutputStream(remoteSocket.getOutputStream());
+			remoteIn = new DataInputStream(remoteSocket.getInputStream());
 			
 			String remoteReq = "";
 			
@@ -226,18 +235,20 @@ public class ProxyServer extends Thread {
 			remoteReq += Utils.httpHeader("User-Agent", Utils.SERVER_NAME);
 			remoteReq += Utils.HTTP_HEADER_END;
 			
-			remoteDos.writeBytes(remoteReq);
+			remoteOut.writeBytes(remoteReq);
 			System.out.println("Sent request to remote server...");
 			
 			remoteHeaders = new Hashtable<String,String>();
 			
-			String remoteResponseLine = remoteDis.readLine();
-			System.out.println("R->P | " + remoteResponseLine);
+			String remoteResponseLine = remoteIn.readLine();
+			System.out.println("< " + remoteResponseLine);
+			//System.out.println("R->P | " + remoteResponseLine);
 			
 			// read all the headers
 			if (!readRemoteHeaders()) return;
 			
 			byte[] remoteBody = null;
+			
 			
 			if (remoteHeaders.containsKey("content-length")) {
 				// remote server told us from the get-go how much data to
@@ -255,14 +266,16 @@ public class ProxyServer extends Thread {
 				
 				remoteBody = new byte[contentLength];
 				for (int i = 0; i < contentLength; i++) {
-					remoteBody[i] = (byte) remoteDis.read();
+					remoteBody[i] = (byte) remoteIn.read();
 				}
+				
 				
 			} else if (remoteHeaders.containsKey("transfer-encoding")) {
 				// remote server is sending data in chunks, so read all the chunks
 				
 				// we do not support any transfer-encoding methods besides chunked
 				if (!remoteHeaders.get("transfer-encoding").equalsIgnoreCase("chunked")) {
+					System.err.println("Unknown transfer-encoding method: " + remoteHeaders.get("transfer-encoding"));
 					respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
 					return;
 				}
@@ -270,11 +283,9 @@ public class ProxyServer extends Thread {
 				remoteBody = new byte[0];
 				
 				String chunkHead;
-				while ((chunkHead = remoteDis.readLine()) != null) {
+				while ((chunkHead = remoteIn.readLine()) != null) {
 					
 					if (chunkHead.equals("0") || chunkHead.equals("")) break;
-					
-					System.out.println("CHNK | " + chunkHead);
 					
 					int chunkSize = 0;
 					try {
@@ -291,43 +302,48 @@ public class ProxyServer extends Thread {
 					
 					remoteBody = Arrays.copyOf(remoteBody, newLength);
 					for (int i = oldLength; i < newLength; i++) {
-						remoteBody[i] = (byte) remoteDis.read();
+						remoteBody[i] = (byte) remoteIn.read();
 					}
-					remoteDis.skipBytes(2); // skip the CRLF
+					remoteIn.skipBytes(2); // skip the CRLF
 				}
-
-				System.out.println("SIZE | " + remoteBody.length);
-				System.out.println("BODY | " + Arrays.toString(remoteBody));
 				
 				remoteHeaders.remove("transfer-encoding");
 				remoteHeaders.put("content-length", String.valueOf(remoteBody.length));
 				
 				// we've reached the end of the chunks, so add footers to our headers array if any exist
 				if (!readRemoteHeaders()) return;
+				
+				
+			} else {
+				// remote server is sending data using some voodoo magic we don't understand
+				System.err.println("Unknown data tranfer method");
+				respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+				return;
 			}
 			
 			
-			System.out.println("Closing remote connection...");
-			client.close();
+			//System.out.println("Closing remote connection...");
+			remoteOut.close();
+			remoteIn.close();
+			remoteSocket.close();
 			
 			
 			
 
-			dos.writeBytes(remoteResponseLine);
+			clientOut.writeBytes(remoteResponseLine);
 			Enumeration<String> keys = remoteHeaders.keys();
 			while (keys.hasMoreElements()) {
 				String key = keys.nextElement();
-				dos.writeBytes(Utils.httpHeader(key, remoteHeaders.get(key)));
+				clientOut.writeBytes(Utils.httpHeader(key, remoteHeaders.get(key)));
 			}
-			dos.writeBytes(Utils.HTTP_HEADER_END);
+			clientOut.writeBytes(Utils.HTTP_HEADER_END);
 
-			dos.write(remoteBody);
+			clientOut.write(remoteBody);
 			
-			dos.flush();
-			dos.close();
-			
-			System.out.println("Closing client connection...");
-			server.close();
+			//System.out.println("Closing client connection...");
+			clientOut.close();
+			clientIn.close();
+			clientSocket.close();
 			
 			
 			
@@ -349,11 +365,11 @@ public class ProxyServer extends Thread {
 	 */
 	public boolean readRemoteHeaders() throws IOException {
 		String remoteLine;
-		while ((remoteLine = remoteDis.readLine()) != null) {
+		while ((remoteLine = remoteIn.readLine()) != null) {
 			
 			if (remoteLine.equals("")) break;
 			
-			System.out.println("R->P | "+remoteLine);
+			//System.out.println("R->P | "+remoteLine);
 			
 			String[] splitLine = remoteLine.split(":");
 			if (splitLine.length < 2) {
@@ -372,7 +388,7 @@ public class ProxyServer extends Thread {
 	 */
 	public void beginResponse(HttpStatus status) throws IOException {
 		System.err.println(status.getFullName());
-		dos.writeBytes(Utils.HTTP_VERSION + " " + status.getFullName());
+		clientOut.writeBytes(Utils.HTTP_VERSION + " " + status.getFullName());
 		sendHeader("Server", Utils.SERVER_NAME);
 		sendHeader("Date", Utils.getRFC1123Date());
 	}
@@ -381,16 +397,16 @@ public class ProxyServer extends Thread {
 	 * Finishes the header block being sent to the client
 	 */
 	public void endHeader() throws IOException {
-		dos.writeBytes(Utils.HTTP_HEADER_END);
+		clientOut.writeBytes(Utils.HTTP_HEADER_END);
 	}
 	
 	/**
 	 * Closes up all open connections for this request
 	 */
 	public void endResponse() throws IOException {
-		dos.close();
-		if (server != null && !server.isClosed()) server.close();
-		if (client != null && !client.isClosed()) client.close();
+		clientOut.close();
+		if (clientSocket != null && !clientSocket.isClosed()) clientSocket.close();
+		if (remoteSocket != null && !remoteSocket.isClosed()) remoteSocket.close();
 	}
 	
 	/**
@@ -401,7 +417,7 @@ public class ProxyServer extends Thread {
 		sendHeader("Content-Length", String.valueOf(body.length()));
 		sendHeader("Content-Type", "text/html");
 		endHeader();
-		dos.writeBytes(body);
+		clientOut.writeBytes(body);
 		endResponse();
 	}
 	
@@ -424,7 +440,7 @@ public class ProxyServer extends Thread {
 	 * Convenience method for sending an HTTP header to the client
 	 */
 	public void sendHeader(String key, String value) throws IOException {
-		dos.writeBytes(Utils.httpHeader(key, value));
+		clientOut.writeBytes(Utils.httpHeader(key, value));
 	}
 
 }
