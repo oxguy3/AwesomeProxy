@@ -7,15 +7,12 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Hashtable;
 
 
 public class ProxyServer extends Thread {
-	
-	final static String HTTP_VERSION = "HTTP/1.1";
-	final static String CRLF = "\r\n";
-	final static String LF = "\n";
 
 	// should the server respond to HTTP requests at all?
 	volatile static boolean isAlive;
@@ -29,8 +26,9 @@ public class ProxyServer extends Thread {
 	DataOutputStream dos; // proxy -> client
 	
 	Socket client; // connection to remote
-	DataInputStream remoteDis; // 
-	DataOutputStream remoteDos;
+	DataInputStream remoteDis; // remote -> proxy
+	DataOutputStream remoteDos; // proxy -> remote
+	Hashtable<String,String> remoteHeaders; // headers received from remote
 	
 	public ProxyServer(Socket srv) {
 		server = srv;
@@ -95,7 +93,7 @@ public class ProxyServer extends Thread {
 				lines.add(line);
 			}
 			
-			// firefox seems to like sending empty requests when it accesses cached files, so let's just ignore those
+			// ignore empty requests
 			if (lines.size() < 1) {
 				System.out.println("Closing empty request...");
 				server.close();
@@ -107,17 +105,17 @@ public class ProxyServer extends Thread {
 			
 			String[] requestArgs = request.split(" ");
 			if (requestArgs.length != 3) {
-				respondError(HttpStatus.BAD_REQUEST);
+				respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
 				return;
 			}
 			// we only support GET
 			if (!requestArgs[0].equalsIgnoreCase("GET")) {
-				respondError(HttpStatus.METHOD_NOT_ALLOWED);
+				respondWithHtmlStatus(HttpStatus.METHOD_NOT_ALLOWED);
 				return;
 			}
 			// force http/1.1
-			if (!requestArgs[2].equalsIgnoreCase(HTTP_VERSION)) {
-				respondError(HttpStatus.HTTP_VER_NOT_SUPPORTED);
+			if (!requestArgs[2].equalsIgnoreCase(Utils.HTTP_VERSION)) {
+				respondWithHtmlStatus(HttpStatus.HTTP_VER_NOT_SUPPORTED);
 				return;
 			}
 			
@@ -130,9 +128,10 @@ public class ProxyServer extends Thread {
 				
 				
 				if (requestParams.length <= 1) {
-					respondWithSimpleHtml(
-							HttpStatus.ACCEPTED,
-							"Welcome to " + PSUtils.SERVER_NAME + "!",
+					// a simple homepage
+					
+					respondWithHtml(HttpStatus.ACCEPTED, Utils.getSimpleHtml(
+							"Welcome to " + Utils.SERVER_NAME + "!",
 							"<p>Made by Hayden Schiff and Shir Maimon.</p>"
 							+ "<p>Actions available:</p>"
 							+ "<ul>"
@@ -140,12 +139,14 @@ public class ProxyServer extends Thread {
 							+ "<li><a href=\"/proxy/off\">Disable proxy service</a></li>"
 							+ "<li><a href=\"/exit\">Shutdown the server</a></li>"
 							+ "</ul>"
-					);
+					));
 					return;
 					
-				} else if (requestParams[1].equals("exit")) { // command to shutdown the server
+				} else if (requestParams[1].equals("exit")) {
+					// command to shutdown the server
+					
 					ProxyServer.isAlive = false;
-					respondWithSimpleHtmlMessage(
+					respondWithMessage(
 							HttpStatus.ACCEPTED,
 							"Exit command received",
 							"The server is no longer accepting new connections, and "
@@ -154,12 +155,11 @@ public class ProxyServer extends Thread {
 					return;
 					
 				} else if (requestParams[1].equals("proxy") && requestParams.length > 2) {
-					
 					// commands to turn proxy service on/off
 					
 					if (requestParams[2].equals("on")) {
 						ProxyServer.isProxyActive = true;
-						respondWithSimpleHtmlMessage(
+						respondWithMessage(
 								HttpStatus.ACCEPTED,
 								"Proxy enabled",
 								"The server will now accept proxy requests."
@@ -168,7 +168,7 @@ public class ProxyServer extends Thread {
 						
 					} else if (requestParams[2].equals("off")) {
 						ProxyServer.isProxyActive = false;
-						respondWithSimpleHtmlMessage(
+						respondWithMessage(
 								HttpStatus.ACCEPTED,
 								"Proxy disabled",
 								"The server will stop accepting proxy requests."
@@ -178,23 +178,24 @@ public class ProxyServer extends Thread {
 					} 
 					
 				} else if (requestParams[1].equals("teapot")) {
+					// i couldn't resist
 					
-					respondError(HttpStatus.IM_A_TEAPOT);
+					respondWithHtmlStatus(HttpStatus.IM_A_TEAPOT);
 					return;
 					
 				}
 				
-				respondError(HttpStatus.NOT_FOUND);
+				respondWithHtmlStatus(HttpStatus.NOT_FOUND);
 				return;
 			}
 			
 			// forbid unfamiliar protocols and local files
 			if (!requestUrl.startsWith("http://")) {
-				respondError(HttpStatus.FORBIDDEN);
+				respondWithHtmlStatus(HttpStatus.FORBIDDEN);
 				return;
 			}
 			if (!ProxyServer.isProxyActive) {
-				respondError(HttpStatus.SERVICE_UNAVAILABLE);
+				respondWithHtmlStatus(HttpStatus.SERVICE_UNAVAILABLE);
 			}
 			
 			String urlMinusProtocol = requestUrl.substring("http://".length());
@@ -220,50 +221,90 @@ public class ProxyServer extends Thread {
 			
 			String remoteReq = "";
 			
-			remoteReq += "GET " + requestPath + " " + HTTP_VERSION + CRLF;
-			remoteReq += "Host: " + hostname + CRLF;
-			remoteReq += CRLF;
+			remoteReq += "GET " + requestPath + " " + Utils.HTTP_VERSION;
+			remoteReq += Utils.httpHeader("Host", hostname);
+			remoteReq += Utils.httpHeader("User-Agent", Utils.SERVER_NAME);
+			remoteReq += Utils.HTTP_HEADER_END;
 			
 			remoteDos.writeBytes(remoteReq);
 			System.out.println("Sent request to remote server...");
 			
-			Hashtable<String,String> remoteHeaders = new Hashtable<String,String>();
+			remoteHeaders = new Hashtable<String,String>();
 			
 			String remoteResponseLine = remoteDis.readLine();
-			System.out.println("R>P: " + remoteResponseLine);
+			System.out.println("R->P | " + remoteResponseLine);
 			
-			String remoteLine;
-			while ((remoteLine = remoteDis.readLine()) != null) {
+			// read all the headers
+			if (!readRemoteHeaders()) return;
+			
+			byte[] remoteBody = null;
+			
+			if (remoteHeaders.containsKey("content-length")) {
+				// remote server told us from the get-go how much data to
+				// expect, so just read exactly that many bytes
 				
-				// break after two lines
-				if (remoteLine.equals("")) break;
-				
-				System.out.println("R->P | "+remoteLine);
-				
-				String[] splitLine = remoteLine.split(":");
-				if (splitLine.length < 2) {
-					respondError(HttpStatus.BAD_GATEWAY);
+				String contentLengthStr = remoteHeaders.get("content-length");
+				int contentLength = 0;
+				try {
+					contentLength = Integer.parseInt(contentLengthStr);
+				} catch (NumberFormatException nfe) {
+					System.err.println("Couldn't parse content length from remote server");
+					respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
 					return;
 				}
-				String headerKey = splitLine[0].toLowerCase();
-				remoteHeaders.put(headerKey, remoteLine.substring(headerKey.length()+1).trim());
+				
+				remoteBody = new byte[contentLength];
+				for (int i = 0; i < contentLength; i++) {
+					remoteBody[i] = (byte) remoteDis.read();
+				}
+				
+			} else if (remoteHeaders.containsKey("transfer-encoding")) {
+				// remote server is sending data in chunks, so read all the chunks
+				
+				// we do not support any transfer-encoding methods besides chunked
+				if (!remoteHeaders.get("transfer-encoding").equalsIgnoreCase("chunked")) {
+					respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+					return;
+				}
+				
+				remoteBody = new byte[0];
+				
+				String chunkHead;
+				while ((chunkHead = remoteDis.readLine()) != null) {
+					
+					if (chunkHead.equals("0") || chunkHead.equals("")) break;
+					
+					System.out.println("CHNK | " + chunkHead);
+					
+					int chunkSize = 0;
+					try {
+						// get the size of this chunk
+						chunkSize = Integer.parseInt(chunkHead.split(";")[0], 16);
+					} catch (NumberFormatException e) {
+						System.err.println("Couldn't parse chunk size from remote server");
+						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+						return;
+					}
+					
+					int oldLength = remoteBody.length;
+					int newLength = oldLength + chunkSize;
+					
+					remoteBody = Arrays.copyOf(remoteBody, newLength);
+					for (int i = oldLength; i < newLength; i++) {
+						remoteBody[i] = (byte) remoteDis.read();
+					}
+					remoteDis.skipBytes(2); // skip the CRLF
+				}
+
+				System.out.println("SIZE | " + remoteBody.length);
+				System.out.println("BODY | " + Arrays.toString(remoteBody));
+				
+				remoteHeaders.remove("transfer-encoding");
+				remoteHeaders.put("content-length", String.valueOf(remoteBody.length));
+				
+				// we've reached the end of the chunks, so add footers to our headers array if any exist
+				if (!readRemoteHeaders()) return;
 			}
-			
-			
-			String contentLengthStr = remoteHeaders.get("content-length");
-			if (contentLengthStr == null) {
-				respondError(HttpStatus.BAD_GATEWAY);
-				return;
-			}
-			int contentLength = Integer.parseInt(contentLengthStr);
-			
-			byte[] remoteBody = new byte[contentLength];
-			for (int i = 0; i < contentLength; i++) {
-				if (remoteBody[i] == -1) System.err.print("@");
-				remoteBody[i] = (byte) remoteDis.read();
-			}
-			
-			//System.out.println(Arrays.toString(remoteBody));
 			
 			
 			System.out.println("Closing remote connection...");
@@ -276,10 +317,9 @@ public class ProxyServer extends Thread {
 			Enumeration<String> keys = remoteHeaders.keys();
 			while (keys.hasMoreElements()) {
 				String key = keys.nextElement();
-				String header = CRLF + key + ": " + remoteHeaders.get(key);
-				dos.writeBytes(header);
+				dos.writeBytes(Utils.httpHeader(key, remoteHeaders.get(key)));
 			}
-			dos.writeBytes(CRLF+CRLF);
+			dos.writeBytes(Utils.HTTP_HEADER_END);
 
 			dos.write(remoteBody);
 			
@@ -302,51 +342,89 @@ public class ProxyServer extends Thread {
 		}
 	}
 	
+	/**
+	 * Reads headers from remote server until end of header block is reached
+	 * 
+	 * @return success
+	 */
+	public boolean readRemoteHeaders() throws IOException {
+		String remoteLine;
+		while ((remoteLine = remoteDis.readLine()) != null) {
+			
+			if (remoteLine.equals("")) break;
+			
+			System.out.println("R->P | "+remoteLine);
+			
+			String[] splitLine = remoteLine.split(":");
+			if (splitLine.length < 2) {
+				System.err.println("Invalid header from remote server: " + remoteLine);
+				respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+				return false;
+			}
+			String headerKey = splitLine[0].toLowerCase();
+			remoteHeaders.put(headerKey, remoteLine.substring(headerKey.length()+1).trim());
+		}
+		return true;
+	}
+	
+	/**
+	 * Begins to send the header block to the client
+	 */
 	public void beginResponse(HttpStatus status) throws IOException {
-		dos.writeBytes(HTTP_VERSION + " " + status.getFullName());
-		sendHeader("Server", PSUtils.SERVER_NAME);
-		sendHeader("Date", PSUtils.getRFC1123Date());
+		System.err.println(status.getFullName());
+		dos.writeBytes(Utils.HTTP_VERSION + " " + status.getFullName());
+		sendHeader("Server", Utils.SERVER_NAME);
+		sendHeader("Date", Utils.getRFC1123Date());
 	}
 	
+	/**
+	 * Finishes the header block being sent to the client
+	 */
 	public void endHeader() throws IOException {
-		dos.writeBytes(CRLF+CRLF);
+		dos.writeBytes(Utils.HTTP_HEADER_END);
 	}
 	
+	/**
+	 * Closes up all open connections for this request
+	 */
 	public void endResponse() throws IOException {
 		dos.close();
 		if (server != null && !server.isClosed()) server.close();
 		if (client != null && !client.isClosed()) client.close();
 	}
 	
-	public void respondWithBody(HttpStatus status, String body) throws IOException {
-		respondWithBody(status, body, "text/html");
-	}
-	
-	public void respondWithBody(HttpStatus status, String body, String contentType) throws IOException {
+	/**
+	 * Responds to client with some html text
+	 */
+	public void respondWithHtml(HttpStatus status, String body) throws IOException {
 		beginResponse(status);
 		sendHeader("Content-Length", String.valueOf(body.length()));
-		sendHeader("Content-Type", contentType);
+		sendHeader("Content-Type", "text/html");
 		endHeader();
 		dos.writeBytes(body);
 		endResponse();
 	}
 	
-	public void respondWithSimpleHtmlMessage(HttpStatus status, String title, String message) throws IOException {
-		respondWithBody(status, PSUtils.getSimpleHtmlMessage(title, message));
+	/**
+	 * Responds to client with simple HTML page with a title and a message
+	 */
+	public void respondWithMessage(HttpStatus status, String title, String message) throws IOException {
+		respondWithHtml(status, Utils.getSimpleHtmlMessage(title, message));
 	}
 	
-	public void respondWithSimpleHtml(HttpStatus status, String title, String content) throws IOException {
-		respondWithBody(status, PSUtils.getSimpleHtml(title, content));
+	/**
+	 * Responds to client with generic message for given HTTP status
+	 */
+	public void respondWithHtmlStatus(HttpStatus status) throws IOException {
+		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
+		respondWithHtml(status, body);
 	}
 	
-	public void respondError(HttpStatus status) throws IOException {
-		
-		String body = PSUtils.getSimpleHtmlMessage(status.getFullName(), status.description);
-		respondWithBody(status, body);
-	}
-	
+	/**
+	 * Convenience method for sending an HTTP header to the client
+	 */
 	public void sendHeader(String key, String value) throws IOException {
-		dos.writeBytes(CRLF + key + ": " + value);
+		dos.writeBytes(Utils.httpHeader(key, value));
 	}
 
 }
