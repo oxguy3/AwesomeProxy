@@ -21,6 +21,7 @@ public class RequestWorker extends Thread {
 	Socket clientSocket; // connection to client
 	BufferedReader clientIn; // client -> proxy stream
 	DataOutputStream clientOut; // proxy -> client stream
+	String method; // HTTP method being used
 	
 	Socket remoteSocket; // connection to remote
 	DataInputStream remoteIn; // remote -> proxy stream
@@ -46,6 +47,7 @@ public class RequestWorker extends Thread {
 			String remoteHostname = "";
 			int remotePort = 80;
 			String remotePath = "";
+			method = "";
 			
 			try {
 				ArrayList<String> lines = new ArrayList<String>();
@@ -77,8 +79,10 @@ public class RequestWorker extends Thread {
 					respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
 					return;
 				}
-				// we only support GET
-				if (!requestArgs[0].equalsIgnoreCase("GET")) {
+				method = requestArgs[0];
+				
+				// reject methods we don't support
+				if (!method.equals("GET") && !method.equals("HEAD")) {
 					logError("Invalid HTTP method");
 					respondWithHtmlStatus(HttpStatus.METHOD_NOT_ALLOWED);
 					return;
@@ -199,7 +203,7 @@ public class RequestWorker extends Thread {
 			remoteOut = new DataOutputStream(remoteSocket.getOutputStream());
 			remoteIn = new DataInputStream(remoteSocket.getInputStream());
 			
-			String remoteReq = "GET " + remotePath + " " + Utils.HTTP_VERSION;
+			String remoteReq = method+" " + remotePath + " " + Utils.HTTP_VERSION;
 			logConnection(Node.PROXY, Node.REMOTE, remoteReq);
 			
 			remoteReq += Utils.httpHeader("Host", remoteHostname);
@@ -218,81 +222,80 @@ public class RequestWorker extends Thread {
 				// read all the headers
 				if (!readRemoteHeaders()) return;
 				
-				byte[] remoteBody = null;
+				byte[] remoteBody = new byte[0];
 				
-				
-				if (remoteHeaders.containsKey("content-length")) {
-					// remote server told us from the get-go how much data to
-					// expect, so just read exactly that many bytes
-					
-					String contentLengthStr = remoteHeaders.get("content-length");
-					int contentLength = 0;
-					try {
-						contentLength = Integer.parseInt(contentLengthStr);
-					} catch (NumberFormatException nfe) {
-						logError("Couldn't parse content length from remote server");
-						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-						return;
-					}
-					
-					remoteBody = new byte[contentLength];
-					for (int i = 0; i < contentLength; i++) {
-						remoteBody[i] = (byte) remoteIn.read();
-					}
-					
-					
-				} else if (remoteHeaders.containsKey("transfer-encoding")) {
-					// remote server is sending data in chunks, so read all the chunks
-					
-					// we do not support any transfer-encoding methods besides chunked
-					if (!remoteHeaders.get("transfer-encoding").equalsIgnoreCase("chunked")) {
-						logError("Unknown transfer-encoding method: " + remoteHeaders.get("transfer-encoding"));
-						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-						return;
-					}
-					
-					remoteBody = new byte[0];
-					
-					String chunkHead;
-					while ((chunkHead = remoteIn.readLine()) != null) {
+				if (method != "HEAD") {
+					if (remoteHeaders.containsKey("content-length")) {
+						// remote server told us from the get-go how much data to
+						// expect, so just read exactly that many bytes
 						
-						if (chunkHead.equals("0") || chunkHead.equals("")) break;
-
-						// get the size of this chunk
-						int chunkSize = 0;
+						String contentLengthStr = remoteHeaders.get("content-length");
+						int contentLength = 0;
 						try {
-							chunkSize = Integer.parseInt(chunkHead.split(";")[0], 16);
-						} catch (NumberFormatException e) {
-							logError("Couldn't parse chunk size from remote server");
+							contentLength = Integer.parseInt(contentLengthStr);
+						} catch (NumberFormatException nfe) {
+							logError("Couldn't parse content length from remote server");
 							respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
 							return;
 						}
 						
-						// we need to expand the byte array to accommodate this chunk
-						int oldLength = remoteBody.length;
-						int newLength = oldLength + chunkSize;
-						
-						// add this chunk to the byte array
-						remoteBody = Arrays.copyOf(remoteBody, newLength);
-						for (int i = oldLength; i < newLength; i++) {
+						remoteBody = new byte[contentLength];
+						for (int i = 0; i < contentLength; i++) {
 							remoteBody[i] = (byte) remoteIn.read();
 						}
 						
-						remoteIn.skipBytes(2); // skip the CRLF at the end of the chunk
+						
+					} else if (remoteHeaders.containsKey("transfer-encoding")) {
+						// remote server is sending data in chunks, so read all the chunks
+						
+						// we do not support any transfer-encoding methods besides chunked
+						if (!remoteHeaders.get("transfer-encoding").equalsIgnoreCase("chunked")) {
+							logError("Unknown transfer-encoding method: " + remoteHeaders.get("transfer-encoding"));
+							respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+							return;
+						}
+						
+						String chunkHead;
+						while ((chunkHead = remoteIn.readLine()) != null) {
+							
+							if (chunkHead.equals("0") || chunkHead.equals("")) break;
+	
+							// get the size of this chunk
+							int chunkSize = 0;
+							try {
+								chunkSize = Integer.parseInt(chunkHead.split(";")[0], 16);
+							} catch (NumberFormatException e) {
+								logError("Couldn't parse chunk size from remote server");
+								respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+								return;
+							}
+							
+							// we need to expand the byte array to accommodate this chunk
+							int oldLength = remoteBody.length;
+							int newLength = oldLength + chunkSize;
+							
+							// add this chunk to the byte array
+							remoteBody = Arrays.copyOf(remoteBody, newLength);
+							for (int i = oldLength; i < newLength; i++) {
+								remoteBody[i] = (byte) remoteIn.read();
+							}
+							
+							remoteIn.skipBytes(2); // skip the CRLF at the end of the chunk
+						}
+						
+						remoteHeaders.remove("transfer-encoding");
+						remoteHeaders.put("content-length", String.valueOf(remoteBody.length));
+						
+						// we've reached the end of the chunks, so add footers to our headers array if any exist
+						if (!readRemoteHeaders()) return;
+						
+						
+					} else {
+						// remote server is sending data using some voodoo magic we don't understand
+						logError("Unknown data tranfer method");
+						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
+						return;
 					}
-					
-					remoteHeaders.remove("transfer-encoding");
-					remoteHeaders.put("content-length", String.valueOf(remoteBody.length));
-					
-					// we've reached the end of the chunks, so add footers to our headers array if any exist
-					if (!readRemoteHeaders()) return;
-					
-					
-				} else {
-					// remote server is sending data using some voodoo magic we don't understand
-					logError("Unknown data tranfer method");
-					respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-					return;
 				}
 				
 				
@@ -310,7 +313,7 @@ public class RequestWorker extends Thread {
 				}
 				clientOut.writeBytes(Utils.HTTP_HEADER_END);
 	
-				clientOut.write(remoteBody);
+				if (method != "HEAD") clientOut.write(remoteBody);
 				
 				clientOut.close();
 				clientIn.close();
@@ -326,7 +329,7 @@ public class RequestWorker extends Thread {
 			
 			
 		} catch (IOException e) {
-			e.printStackTrace();
+			if (Utils.LOG_REQUEST_ERRORS) e.printStackTrace();
 		}
 	}
 	
@@ -396,7 +399,7 @@ public class RequestWorker extends Thread {
 		sendHeader("Content-Length", String.valueOf(body.length()));
 		sendHeader("Content-Type", "text/html");
 		endHeader();
-		clientOut.writeBytes(body);
+		writeBody(body);
 		endResponse();
 	}
 	
@@ -413,6 +416,10 @@ public class RequestWorker extends Thread {
 	public void respondWithHtmlStatus(HttpStatus status) throws IOException {
 		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
 		respondWithHtml(status, body);
+	}
+	
+	public void writeBody(String body) throws IOException {
+		if (method != "HEAD") clientOut.writeBytes(body);
 	}
 	
 	
