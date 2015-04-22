@@ -13,7 +13,8 @@ public enum HttpStatus {
 	PARTIAL_CONTENT			(206, "Partial Content"),
 	
 	MULTIPLE_CHOICES		(300, "Multiple Choices"),
-	MOVED_PERMANENTLY		(301, "Moved Permanently"),
+	MOVED_PERMANENTLY		(301, "Moved Permanently",
+			"The resource previously located at this address has been moved."),
 	FOUND					(302, "Found"),
 	SEE_OTHER				(303, "See Other"),
 	NOT_MODIFIED			(304, "Not Modified"),
@@ -21,12 +22,17 @@ public enum HttpStatus {
 	SWITCH_PROXY			(306, "Switch Proxy"),
 	TEMPORARY_REDIRECT		(307, "Temporary Redirect"),
 	
-	BAD_REQUEST				(400, "Bad Request"),
-	UNAUTHORIZED			(401, "Unauthorized"),
+	BAD_REQUEST				(400, "Bad Request",
+			"You made an invalid request that the server cannot process."),
+	UNAUTHORIZED			(401, "Unauthorized",
+			"This URL cannot be accessed without prior authentication."),
 	PAYMENT_REQUIRED		(402, "Payment Required"),
-	FORBIDDEN				(403, "Forbidden"),
-	NOT_FOUND				(404, "Not Found"),
-	METHOD_NOT_ALLOWED		(405, "Method Not Allowed"),
+	FORBIDDEN				(403, "Forbidden",
+			"You are not permitted to access this URL."),
+	NOT_FOUND				(404, "Not Found",
+			"The requested URL could not be found. Please check the address and try again."),
+	METHOD_NOT_ALLOWED		(405, "Method Not Allowed",
+			"The method you used is not supported. This proxy is limited to GET requests."),
 	NOT_ACCEPTABLE			(406, "Not Acceptable"),
 	PROXY_AUTH_REQUIRED		(407, "Proxy Authentication Required"),
 	REQUEST_TIMEOUT			(408, "Request Timeout"),
@@ -39,19 +45,39 @@ public enum HttpStatus {
 	UNSUPPORTED_MEDIA_TYPE	(415, "Unsupported Media Type"),
 	REQ_RANGE_NOT_SATIS		(416, "Requested Range Not Satisfiable"),
 	EXPECTATION_FAILED		(417, "Expectation Failed"),
-	IM_A_TEAPOT				(418, "I'm a teapot"),
+	IM_A_TEAPOT				(418, "I'm a teapot",
+			"I'm a little teapot, short and stout. Here is my handle, here is my spout."),
 	
-	INTERNAL_SERVER_ERROR	(500, "Internal Server Error"),
+	INTERNAL_SERVER_ERROR	(500, "Internal Server Error",
+			"An unknown error occurred."),
 	NOT_IMPLEMENTED			(501, "Not Implemented"),
-	BAD_GATEWAY				(502, "Bad Gateway"),
-	SERVICE_UNAVAILABLE		(503, "Service Unavailable"),
-	GATEWAY_TIMEOUT			(504, "Gateway Timeout"),
-	HTTP_VER_NOT_SUPPORTED 	(505, "HTTP Version Not Supported");
+	BAD_GATEWAY				(502, "Bad Gateway",
+			"The remote server failed to return a valid response."),
+	SERVICE_UNAVAILABLE		(503, "Service Unavailable",
+			"The service you attempted to use is temporarily inactive."),
+	GATEWAY_TIMEOUT			(504, "Gateway Timeout",
+			"The remote server failed to respond quickly enough."),
+	HTTP_VER_NOT_SUPPORTED 	(505, "HTTP Version Not Supported",
+			"This server only supports HTTP 1.1 requests.");
 
 	public final int code;
 	public final String name;
+	public final String description;
+	
 	HttpStatus(int code, String name) {
         this.code = code;
         this.name = name;
+        this.description = "See <a href=\"http://httpstatus.es/" 
+				+ code + "\">this page</a> for more information about this error.";
     }
+	
+	HttpStatus(int code, String name, String description) {
+        this.code = code;
+        this.name = name;
+        this.description = description;
+    }
+	
+	public String getFullName() {
+		return code + " " + name;
+	}
 }
