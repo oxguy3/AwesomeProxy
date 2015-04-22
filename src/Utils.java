@@ -59,11 +59,11 @@ public class Utils {
 	
 
 	public static void log(String message) {
-		if (LOG_MESSAGES) log(message, true);
+		if (LOG_MESSAGES) log(message, false);
 	}
 	
 	public static void logError(String message) {
-		if (LOG_ERRORS) log(message, false);
+		if (LOG_ERRORS) log(message, true);
 	}
 	
 	private static void log(String message, boolean isError) {

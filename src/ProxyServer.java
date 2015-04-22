@@ -5,7 +5,7 @@ import java.net.Socket;
 
 public class ProxyServer extends Thread {
 
-	// should the server respond to HTTP requests at all?
+	// should the server keep listening for new HTTP requests?
 	volatile static boolean isAlive;
 	
 	// should the server respond to proxy HTTP requests?
