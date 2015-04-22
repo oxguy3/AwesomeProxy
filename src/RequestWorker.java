@@ -401,7 +401,7 @@ public class RequestWorker extends Thread {
 				}
 				clientOut.writeBytes(Utils.HTTP_HEADER_END);
 	
-				if (method != "HEAD") clientOut.write(remoteBody);
+				writeBody(remoteBody);
 				
 				clientOut.close();
 				clientIn.close();

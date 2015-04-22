@@ -50,8 +50,8 @@ public class Utils {
 				+ "<link href=\"/css/bootstrap.min.css\" rel=\"stylesheet\">"
 				+ "<style>"
 				+ "footer { margin-top: 10px;}"
+				+ css
 				+ "</style>"
-				+ "<style>" + css + "</style>"
 				+ "</head>"
 				
 				+ "<body>"
