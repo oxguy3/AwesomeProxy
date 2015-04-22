@@ -2,30 +2,33 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketException;
 import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.Date;
 import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.Locale;
-import java.util.Set;
 
 
 public class ProxyServer extends Thread {
 	
 	final static String SERVER_NAME = "Best damn proxy server";
 	final static String HTTP_VERSION = "HTTP/1.1";
-	final static String BR = "\r\n";
+	final static String CRLF = "\r\n";
+	final static String LF = "\n";
+	
+	volatile static boolean stayAlive;
 	
 	Socket server;
+	BufferedReader buff;
+	DataOutputStream dos;
+	Socket client;
+	DataInputStream remoteDis;
+	DataOutputStream remoteDos;
 	
 	public ProxyServer(Socket srv) {
 		server = srv;
@@ -44,13 +47,18 @@ public class ProxyServer extends Thread {
 			
 			System.out.println("Listening for connections on port " + Integer.toString(port) + "...");
 			
-			while (true) {
+			stayAlive = true;
+			
+			while (stayAlive) {
 				Socket server = srvSock.accept();
+				if (!stayAlive) break;
 
 				System.out.println("Received new connection...");
 				ProxyServer worker = new ProxyServer(server);
 				worker.start();
 			}
+			
+			//srvSock.close();
 			
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -60,8 +68,8 @@ public class ProxyServer extends Thread {
 	public void run() {
 		try {
 			//server.getInputStream().skip(server.getInputStream().available());
-			BufferedReader buff = new BufferedReader(new InputStreamReader(server.getInputStream(), Charset.forName("UTF-8")));
-			DataOutputStream dos = new DataOutputStream(server.getOutputStream());
+			buff = new BufferedReader(new InputStreamReader(server.getInputStream(), Charset.forName("UTF-8")));
+			dos = new DataOutputStream(server.getOutputStream());
 			
 			
 			ArrayList<String> lines = new ArrayList<String>();
@@ -72,7 +80,7 @@ public class ProxyServer extends Thread {
 				// break after two lines
 				if (line.equals("")) break;
 				
-				System.out.println(line);
+				System.out.println("C>P: "+line);
 				lines.add(line);
 			}
 			
@@ -86,29 +94,26 @@ public class ProxyServer extends Thread {
 			
 			String[] requestArgs = request.split(" ");
 			if (requestArgs.length != 3) {
-				dos.writeBytes(HTTP_VERSION + " 400 Bad Request");
-				sendObligatoryHeaders(dos);
-				server.close();
+				respondNoContent(HttpStatus.BAD_REQUEST);
 				return;
 			}
 			if (!requestArgs[0].equals("GET")) {
-				dos.writeBytes(HTTP_VERSION + " 405 Method Not Allowed");
-				sendObligatoryHeaders(dos);
-				server.close();
+				respondNoContent(HttpStatus.METHOD_NOT_ALLOWED);
 				return;
 			}
 			if (!requestArgs[2].equals(HTTP_VERSION)) {
-				dos.writeBytes(HTTP_VERSION + " 505 HTTP Version Not Supported");
-				sendObligatoryHeaders(dos);
-				server.close();
+				respondNoContent(HttpStatus.HTTP_VER_NOT_SUPPORTED);
 				return;
 			}
 			
 			String requestUrl = requestArgs[1];
+			if (requestUrl.equals("/exit")) {
+				ProxyServer.stayAlive = false;
+				respondWithBody(HttpStatus.OK, "<html><body><h1>OK</h1><p>Server will stop accepting new requests...</p></body></html>");
+				return;
+			}
 			if (!requestUrl.startsWith("http://")) {
-				dos.writeBytes(HTTP_VERSION + " 403 Forbidden");
-				sendObligatoryHeaders(dos);
-				server.close();
+				respondNoContent(HttpStatus.FORBIDDEN);
 				return;
 			}
 			String urlMinusProtocol = requestUrl.substring("http://".length());
@@ -122,18 +127,16 @@ public class ProxyServer extends Thread {
 				remotePort = Integer.parseInt(hostnameExplode[1]);
 			}
 			
-			Socket client = new Socket(hostname, remotePort);
+			client = new Socket(hostname, remotePort);
 			System.out.println("Connecting to remote server...");
-			DataOutputStream remoteDos = new DataOutputStream(client.getOutputStream());
-			DataInputStream remoteDis = new DataInputStream(client.getInputStream());
-			//BufferedReader remoteBuff = new BufferedReader(new InputStreamReader(remoteIn));
+			remoteDos = new DataOutputStream(client.getOutputStream());
+			remoteDis = new DataInputStream(client.getInputStream());
 			
 			String remoteReq = "";
 			
-			remoteReq += "GET " + requestPath + " " + HTTP_VERSION + BR;
-			remoteReq += "Host: " + hostname + BR;
-			//sendObligatoryHeaders(remoteDos);
-			remoteReq += BR;
+			remoteReq += "GET " + requestPath + " " + HTTP_VERSION + CRLF;
+			remoteReq += "Host: " + hostname + CRLF;
+			remoteReq += CRLF;
 			
 			remoteDos.writeBytes(remoteReq);
 			System.out.println("Sent request to remote server...");
@@ -150,11 +153,7 @@ public class ProxyServer extends Thread {
 				
 				String[] splitLine = remoteLine.split(":");
 				if (splitLine.length < 2) {
-					dos.writeBytes(HTTP_VERSION + " 502 Bad Gateway");
-					sendObligatoryHeaders(dos);
-					dos.close();
-					server.close();
-					client.close();
+					respondNoContent(HttpStatus.BAD_GATEWAY);
 					return;
 				}
 				String headerKey = splitLine[0].toLowerCase();
@@ -164,11 +163,7 @@ public class ProxyServer extends Thread {
 			
 			String contentLengthStr = remoteHeaders.get("content-length");
 			if (contentLengthStr == null) {
-				dos.writeBytes(HTTP_VERSION + " 502 Bad Gateway");
-				sendObligatoryHeaders(dos);
-				dos.close();
-				server.close();
-				client.close();
+				respondNoContent(HttpStatus.BAD_GATEWAY);
 				return;
 			}
 			int contentLength = Integer.parseInt(contentLengthStr);
@@ -178,7 +173,7 @@ public class ProxyServer extends Thread {
 				remoteBody[i] = (byte) remoteDis.read();
 			}
 			
-			System.out.println(Arrays.toString(remoteBody));
+			//System.out.println(Arrays.toString(remoteBody));
 			
 			
 			System.out.println("Closing remote connection...");
@@ -188,16 +183,13 @@ public class ProxyServer extends Thread {
 			
 
 			dos.writeBytes(remoteResponseLine);
-			System.out.print("> "+remoteResponseLine);
 			Enumeration<String> keys = remoteHeaders.keys();
 			while (keys.hasMoreElements()) {
 				String key = keys.nextElement();
-				String header = "\n" + key + ": " + remoteHeaders.get(key);
-				System.out.print(header+"> ");
+				String header = CRLF + key + ": " + remoteHeaders.get(key);
 				dos.writeBytes(header);
 			}
-			System.out.print("> "+"\n\n");
-			dos.writeBytes("\n\n");
+			dos.writeBytes(CRLF+CRLF);
 
 			dos.write(remoteBody);
 			
@@ -220,9 +212,31 @@ public class ProxyServer extends Thread {
 		}
 	}
 	
-	public static void sendObligatoryHeaders(DataOutputStream dos) throws IOException {
-		dos.writeBytes(BR + "Server: " + SERVER_NAME);
-		dos.writeBytes(BR + "Date: " + new SimpleDateFormat("E, d MMM yyyy HH:mm:ss Z", Locale.US).format(new Date()));
+	public void beginResponse(HttpStatus status) throws IOException {
+		dos.writeBytes(HTTP_VERSION + " " + status.code + " " + status.name);
+		sendHeader("Server", SERVER_NAME);
+		sendHeader("Date", new SimpleDateFormat("E, d MMM yyyy HH:mm:ss Z", Locale.US).format(new Date()));
+	}
+	
+	public void endResponse() throws IOException {
+		dos.close();
+		if (server != null && !server.isClosed()) server.close();
+		if (client != null && !client.isClosed()) client.close();
+	}
+	
+	public void respondWithBody(HttpStatus status, String body) throws IOException {
+		beginResponse(status);
+		dos.writeBytes(CRLF+CRLF+body);
+		endResponse();
+	}
+	
+	public void respondNoContent(HttpStatus status) throws IOException {
+		beginResponse(status);
+		endResponse();
+	}
+	
+	public void sendHeader(String key, String value) throws IOException {
+		dos.writeBytes(CRLF + key + ": " + value);
 	}
 
 }
