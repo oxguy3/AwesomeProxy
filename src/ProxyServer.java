@@ -42,32 +42,36 @@ public class ProxyServer extends Thread {
 			port = Integer.parseInt(portStr);
 		}
 		
+		ServerSocket srvSock;
+		
 		try {
-			ServerSocket srvSock = new ServerSocket(port);
-			
+			srvSock = new ServerSocket(port);
 			System.out.println("Listening for connections on port " + Integer.toString(port) + "...");
 			
-			stayAlive = true;
+		} catch (IOException e) {
+			e.printStackTrace();
+			return;
+		}
 			
-			while (stayAlive) {
+			
+		stayAlive = true;
+		
+		while (stayAlive) {
+			try {
 				Socket server = srvSock.accept();
 				if (!stayAlive) break;
 
 				System.out.println("Received new connection...");
 				ProxyServer worker = new ProxyServer(server);
 				worker.start();
+			} catch (IOException e) {
+				e.printStackTrace();
 			}
-			
-			//srvSock.close();
-			
-		} catch (IOException e) {
-			e.printStackTrace();
 		}
 	}
 	
 	public void run() {
 		try {
-			//server.getInputStream().skip(server.getInputStream().available());
 			buff = new BufferedReader(new InputStreamReader(server.getInputStream(), Charset.forName("UTF-8")));
 			dos = new DataOutputStream(server.getOutputStream());
 			
