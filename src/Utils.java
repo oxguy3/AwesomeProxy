@@ -5,7 +5,20 @@ import java.util.Locale;
 
 public class Utils {
 	
+	// name used for self-identification
 	final static String SERVER_NAME = "AwesomeProxy";
+	
+	// should we log notices/errors?
+	final static boolean LOG_MESSAGES = true;
+	final static boolean LOG_ERRORS = true;
+	
+	// log RequestWorker messages/errors?
+	final static boolean LOG_REQUEST_MESSAGES = true; // only if LOG_MESSAGES
+	final static boolean LOG_REQUEST_ERRORS = true; // only if LOG_ERRORS
+	final static boolean LOG_REQUEST_CLIENT_CONNECTIONS = true; // log requests w/client? (only if LOG_REQUEST_MESSAGES)
+	final static boolean LOG_REQUEST_REMOTE_CONNECTIONS = true; // log requests w/remote? (only if LOG_REQUEST_MESSAGES)
+	
+	
 	
 	final static String HTTP_VERSION = "HTTP/1.1";
 	final static String CRLF = "\r\n";
@@ -42,5 +55,18 @@ public class Utils {
 	 */
 	public static String httpHeader(String key, String value) {
 		return CRLF + key + ": " + value;
+	}
+	
+
+	public static void log(String message) {
+		if (LOG_MESSAGES) log(message, true);
+	}
+	
+	public static void logError(String message) {
+		if (LOG_ERRORS) log(message, false);
+	}
+	
+	private static void log(String message, boolean isError) {
+		(isError ? System.err : System.out).println(message);
 	}
 }
