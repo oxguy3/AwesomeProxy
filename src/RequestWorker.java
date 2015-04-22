@@ -1,13 +1,14 @@
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Hashtable;
@@ -117,13 +118,19 @@ public class RequestWorker extends Thread {
 						
 						respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
 								"Welcome to " + Utils.SERVER_NAME + "!",
-								"<p>Made by Hayden Schiff and Shir Maimon.</p>"
-								+ "<p>Actions available:</p>"
-								+ "<ul>"
-								+ "<li><a href=\"/proxy/on\">Enable proxy service</a></li>"
-								+ "<li><a href=\"/proxy/off\">Disable proxy service</a></li>"
-								+ "<li><a href=\"/exit\">Shutdown the server</a></li>"
-								+ "</ul>"
+								
+								"<div class=\"col-md-12\"><p class=\"text-center\">Made by Hayden Schiff and Shir Maimon.</p></div>"
+								+ "<div class=\"col-sm-4\">"
+								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
+								+ "</div>"
+								+ "<div class=\"col-sm-4\">"
+								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/off\">Disable proxy service</a>"
+								+ "</div>"
+								+ "<div class=\"col-sm-4\">"
+								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shutdown the server</a>"
+								+ "</div>",
+								
+								".page-header h1 { text-align:center; }"
 						));
 						return;
 						
@@ -168,6 +175,53 @@ public class RequestWorker extends Thread {
 						respondWithHtmlStatus(HttpStatus.IM_A_TEAPOT);
 						return;
 						
+					} else {
+						// get file from local filesystem
+						
+						File file = new File("static" + requestUrl);
+						
+						// we don't do indexing
+						if (file.isDirectory()) {
+							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+							return;
+						}
+						// not found if file doesn't exist
+						if (!file.exists()) {
+							respondWithHtmlStatus(HttpStatus.NOT_FOUND);
+							return;
+						}
+
+						
+						FileInputStream fileIn = new FileInputStream(file);
+						//byte[] fileData = new byte[0];
+						byte[] fileBuffer = new byte[Utils.FILE_BUFFER_SIZE];
+						int fileBufferSize = 0;
+						
+						// try to get the content type
+						String fileName = file.getName();
+						String fileExt = fileName.substring(fileName.lastIndexOf(".")+1);
+						String fileContentType = Utils.getMimetypeForExtension(fileExt);//Files.probeContentType(requestedFile.toPath());
+						
+						// start talking to the client
+						beginResponse(HttpStatus.OK);
+						if (fileContentType != null) {
+							sendHeader("Content-Type", fileContentType);
+						}
+						
+						sendHeader("Transfer-Encoding", "chunked");
+						endHeader();
+
+						while ((fileBufferSize = fileIn.read(fileBuffer)) != -1) {
+							
+							writeBody(Integer.toString(fileBufferSize, 16) + Utils.CRLF);
+							writeBody(Arrays.copyOf(fileBuffer, fileBufferSize));
+							writeBody(Utils.CRLF);
+						}
+						writeBody("0"+Utils.CRLF+Utils.CRLF);
+						endResponse();
+						
+						fileIn.close();
+						return;
 					}
 					
 					respondWithHtmlStatus(HttpStatus.NOT_FOUND);
@@ -477,9 +531,13 @@ public class RequestWorker extends Thread {
 		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
 		respondWithHtml(status, body);
 	}
-	
+
 	public void writeBody(String body) throws IOException {
 		if (method != "HEAD") clientOut.writeBytes(body);
+	}
+	
+	public void writeBody(byte[] body) throws IOException {
+		if (method != "HEAD") clientOut.write(body);
 	}
 	
 	
