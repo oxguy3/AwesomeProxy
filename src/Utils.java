@@ -24,6 +24,12 @@ public class Utils {
 	// how many bytes of a file should the file server read at a time?
 	final static int FILE_BUFFER_SIZE = 1024;
 	
+	// The assignment said to only accept GET requests or return "Bad Method".
+	// We also accept HEAD and POST, and we return the correct response of
+	// "Not Implemented" for unsupported methods. To disable this
+	// behavior, set this boolean to true.
+	final static boolean STICK_TO_THE_SCRIPT = false;
+	
 	// some strings that get used a lot, for convenience
 	final static String HTTP_VERSION = "HTTP/1.1";
 	final static String CRLF = "\r\n";

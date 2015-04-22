@@ -19,7 +19,6 @@ public enum HttpStatus {
 	SEE_OTHER				(303, "See Other"),
 	NOT_MODIFIED			(304, "Not Modified"),
 	USE_PROXY				(305, "Use Proxy"),
-	SWITCH_PROXY			(306, "Switch Proxy"),
 	TEMPORARY_REDIRECT		(307, "Temporary Redirect"),
 	
 	BAD_REQUEST				(400, "Bad Request",
@@ -51,7 +50,8 @@ public enum HttpStatus {
 	
 	INTERNAL_SERVER_ERROR	(500, "Internal Server Error",
 			"An unknown error occurred."),
-	NOT_IMPLEMENTED			(501, "Not Implemented"),
+	NOT_IMPLEMENTED			(501, "Not Implemented",
+			"This server only supports the GET and HEAD methods."),
 	BAD_GATEWAY				(502, "Bad Gateway",
 			"The remote server failed to return a valid response."),
 	SERVICE_UNAVAILABLE		(503, "Service Unavailable",
@@ -69,7 +69,7 @@ public enum HttpStatus {
         this.code = code;
         this.name = name;
         this.description = "See <a href=\"http://httpstatus.es/" 
-				+ code + "\">this page</a> for more information about this error.";
+				+ code + "\">this page</a> for more information about this status message.";
     }
 	
 	HttpStatus(int code, String name, String description) {

@@ -22,11 +22,13 @@ public class RequestWorker extends Thread {
 	DataInputStream clientIn; // client -> proxy stream
 	DataOutputStream clientOut; // proxy -> client stream
 	Hashtable<String,String> clientHeaders; // headers received from client
+	byte[] clientBody; // body received from client
 	
 	Socket remoteSocket; // connection to remote
 	DataInputStream remoteIn; // remote -> proxy stream
 	DataOutputStream remoteOut; // proxy -> remote stream
 	Hashtable<String,String> remoteHeaders; // headers received from remote
+	byte[] remoteBody; // body received from remote
 	
 	public RequestWorker(Socket clientSocket, int id) {
 		this.clientSocket = clientSocket;
@@ -66,14 +68,6 @@ public class RequestWorker extends Thread {
 				if (!readClientHeaders()) return;
 				
 				
-				host = clientHeaders.get("host");
-				if (host == null) {
-					logError("No host specified in request");
-					respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
-					return;
-				}
-				
-				
 				String[] requestArgs = request.split(" ");
 				if (requestArgs.length != 3) {
 					logError("Invalid HTTP header line");
@@ -83,9 +77,12 @@ public class RequestWorker extends Thread {
 				method = requestArgs[0];
 				
 				// reject methods we don't support
-				if (!method.equals("GET") && !method.equals("HEAD")) {
-					logError("Invalid HTTP method");
-					respondWithHtmlStatus(HttpStatus.METHOD_NOT_ALLOWED);
+				if (!(method.equalsIgnoreCase("GET")
+						|| (method.equalsIgnoreCase("HEAD") && !Utils.STICK_TO_THE_SCRIPT)
+						|| (method.equalsIgnoreCase("POST") && !Utils.STICK_TO_THE_SCRIPT))) {
+					logError("Invalid or unimplemented HTTP method");
+					respondWithHtmlStatus(
+							(Utils.STICK_TO_THE_SCRIPT) ? (HttpStatus.METHOD_NOT_ALLOWED) : (HttpStatus.NOT_IMPLEMENTED));
 					return;
 				}
 				// force http/1.1
@@ -93,6 +90,18 @@ public class RequestWorker extends Thread {
 					logError("Invalid HTTP version");
 					respondWithHtmlStatus(HttpStatus.HTTP_VER_NOT_SUPPORTED);
 					return;
+				}
+				
+				// http/1.1 requires the host header be set
+				host = clientHeaders.get("host");
+				if (host == null) {
+					logError("No host specified in request");
+					respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
+					return;
+				}
+				
+				if (method.equalsIgnoreCase("POST")) {
+					if (!readClientBody()) return;
 				}
 				
 				String requestUrl = requestArgs[1]; // the URI that our client wants to access
@@ -213,11 +222,11 @@ public class RequestWorker extends Thread {
 
 						while ((fileBufferSize = fileIn.read(fileBuffer)) != -1) {
 							
-							writeBody(Integer.toString(fileBufferSize, 16) + Utils.CRLF);
-							writeBody(Arrays.copyOf(fileBuffer, fileBufferSize));
-							writeBody(Utils.CRLF);
+							writeClientBody(Integer.toString(fileBufferSize, 16) + Utils.CRLF);
+							writeClientBody(Arrays.copyOf(fileBuffer, fileBufferSize));
+							writeClientBody(Utils.CRLF);
 						}
-						writeBody("0"+Utils.CRLF+Utils.CRLF);
+						writeClientBody("0"+Utils.CRLF+Utils.CRLF);
 						endResponse();
 						
 						fileIn.close();
@@ -260,7 +269,7 @@ public class RequestWorker extends Thread {
 			try {
 				remoteSocket = new Socket(remoteHostname, remotePort);
 			} catch (UnknownHostException e) {
-				logError("Failed to identify remote hostname");
+				logError("Unknown remote hostname");
 				respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
 				return;
 			}
@@ -277,6 +286,13 @@ public class RequestWorker extends Thread {
 			String viaPrefix = (clientHeaders.containsKey("Via")) ? (clientHeaders.get("Via") + ", ") : "";
 			remoteReq += Utils.httpHeader("Via", viaPrefix + "1.1 " + host);
 			
+			// must pass length for POST
+			if (method.equalsIgnoreCase("POST")) {
+				String contentLength = (clientHeaders.containsKey("Content-Length")) ? 
+						(clientHeaders.get("Content-Length") + ", ") : String.valueOf(clientBody.length);
+				remoteReq += Utils.httpHeader("Content-Length", contentLength);
+			}
+			
 			
 			// some headers should be copied from the C->P request to the P->R request
 			String[] copyHeaders = {
@@ -286,9 +302,10 @@ public class RequestWorker extends Thread {
 					"Accept-Language", 
 					"Accept-Ranges",
 					"Authorization",
-					"DNT",
+					"DNT", //do not track flag
 					"From",
-					"User-Agent"
+					"User-Agent",
+					"Content-Type"
 					};
 			for (String copyKey : copyHeaders) {
 				if (clientHeaders.containsKey(copyKey)) {
@@ -298,7 +315,10 @@ public class RequestWorker extends Thread {
 			
 			remoteReq += Utils.HTTP_HEADER_END;
 			
-			remoteOut.writeBytes(remoteReq);
+			writeRemoteBody(remoteReq);
+			
+			if (method.equalsIgnoreCase("POST")) writeRemoteBody(clientBody);
+			
 			
 			remoteHeaders = new Hashtable<String,String>();
 			
@@ -310,10 +330,11 @@ public class RequestWorker extends Thread {
 				// read all the headers
 				if (!readRemoteHeaders()) return;
 				
-				byte[] remoteBody = new byte[0];
+				//byte[] remoteBody = new byte[0];
 				
 				if (method != "HEAD") {
-					if (remoteHeaders.containsKey("content-length")) {
+					if (!readRemoteBody()) return;
+					/*if (remoteHeaders.containsKey("content-length")) {
 						// remote server told us from the get-go how much data to
 						// expect, so just read exactly that many bytes
 						
@@ -383,7 +404,7 @@ public class RequestWorker extends Thread {
 						logError("Unknown data tranfer method");
 						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
 						return;
-					}
+					}*/
 				}
 				
 				
@@ -400,8 +421,8 @@ public class RequestWorker extends Thread {
 					clientOut.writeBytes(Utils.httpHeader(key, remoteHeaders.get(key)));
 				}
 				clientOut.writeBytes(Utils.HTTP_HEADER_END);
-	
-				writeBody(remoteBody);
+				
+				writeClientBody(remoteBody);
 				
 				clientOut.close();
 				clientIn.close();
@@ -445,7 +466,7 @@ public class RequestWorker extends Thread {
 	 * @param isRemote if true, remote; if false, client
 	 * @return success
 	 */
-	private boolean readHeaders(boolean isRemote) throws IOException {
+	public boolean readHeaders(boolean isRemote) throws IOException {
 		String remoteLine;
 		while ((remoteLine = (isRemote ? remoteIn : clientIn).readLine()) != null) {
 			
@@ -469,6 +490,114 @@ public class RequestWorker extends Thread {
 		}
 		return true;
 	}
+	
+	
+	public boolean readClientBody() throws IOException {
+		return readBody(false);
+	}
+	
+	public boolean readRemoteBody() throws IOException {
+		return readBody(true);
+	}
+	
+	private boolean readBody(boolean isRemote) throws IOException {
+		
+		Hashtable<String,String> headers = isRemote ? remoteHeaders : clientHeaders;
+		byte[] body = isRemote ? remoteBody : clientBody;
+		DataInputStream in = isRemote ? remoteIn : clientIn;
+		String nodeName = isRemote ? "remote server" : "client";
+		HttpStatus httpStatusBadBody = isRemote ? HttpStatus.BAD_GATEWAY : HttpStatus.BAD_REQUEST;
+		
+		if (body == null) body = new byte[0];
+
+		if (headers.containsKey("content-length")) {
+			// they told us from the get-go how much data to
+			// expect, so just read exactly that many bytes
+			
+			String contentLengthStr = headers.get("content-length");
+			int contentLength = 0;
+			try {
+				contentLength = Integer.parseInt(contentLengthStr);
+			} catch (NumberFormatException nfe) {
+				logError("Couldn't parse content length from " + nodeName);
+				respondWithHtmlStatus(httpStatusBadBody);
+				return false;
+			}
+			
+			body = new byte[contentLength];
+			for (int i = 0; i < contentLength; i++) {
+				body[i] = (byte) in.read();
+			}
+			
+			
+		} else if (headers.containsKey("transfer-encoding")) {
+			// they're sending data in chunks, so read all the chunks
+			
+			// we do not support any transfer-encoding methods besides chunked
+			if (!headers.get("transfer-encoding").equalsIgnoreCase("chunked")) {
+				logError("Unknown transfer-encoding method from "
+						+ nodeName + ": " + headers.get("transfer-encoding"));
+				respondWithHtmlStatus(httpStatusBadBody);
+				return false;
+			}
+			
+			String chunkHead;
+			while ((chunkHead = remoteIn.readLine()) != null) {
+				
+				if (chunkHead.equals("0") || chunkHead.equals("")) break;
+
+				// get the size of this chunk
+				int chunkSize = 0;
+				try {
+					chunkSize = Integer.parseInt(chunkHead.split(";")[0], 16);
+				} catch (NumberFormatException e) {
+					logError("Couldn't parse chunk size from " + nodeName);
+					respondWithHtmlStatus(httpStatusBadBody);
+					return false;
+				}
+				
+				// we need to expand the byte array to accommodate this chunk
+				int oldLength = body.length;
+				int newLength = oldLength + chunkSize;
+				
+				// add this chunk to the byte array
+				body = Arrays.copyOf(body, newLength);
+				for (int i = oldLength; i < newLength; i++) {
+					body[i] = (byte) in.read();
+				}
+				
+				in.skipBytes(2); // skip the CRLF at the end of the chunk
+			}
+			
+			headers.remove("transfer-encoding");
+			headers.put("content-length", String.valueOf(body.length));
+			
+			// we've reached the end of the chunks, so add footers to our headers array if any exist
+			if (!readHeaders(isRemote)) return false;
+			
+			
+		} else {
+			// no content received (or at least none we know how to read)
+			
+//			// they're sending data using some voodoo magic we don't understand
+//			logError("Unknown data tranfer method from " + nodeName);
+//			respondWithHtmlStatus(httpStatusBadBody);
+//			return false;
+		}
+		
+		if (isRemote) {
+			remoteHeaders = headers;
+			remoteBody = body;
+			remoteIn = in;
+		} else {
+			clientHeaders = headers;
+			clientBody = body;
+			clientIn = in;
+		}
+		
+		return true;
+	}
+	
 	
 	/**
 	 * Begins to send the header block to the client
@@ -513,7 +642,7 @@ public class RequestWorker extends Thread {
 		sendHeader("Content-Length", String.valueOf(body.length()));
 		sendHeader("Content-Type", "text/html");
 		endHeader();
-		writeBody(body);
+		writeClientBody(body);
 		endResponse();
 	}
 	
@@ -532,12 +661,20 @@ public class RequestWorker extends Thread {
 		respondWithHtml(status, body);
 	}
 
-	public void writeBody(String body) throws IOException {
-		if (method != "HEAD") clientOut.writeBytes(body);
+	public void writeClientBody(String body) throws IOException {
+		if (!method.equalsIgnoreCase("HEAD")) clientOut.writeBytes(body);
 	}
 	
-	public void writeBody(byte[] body) throws IOException {
-		if (method != "HEAD") clientOut.write(body);
+	public void writeClientBody(byte[] body) throws IOException {
+		if (!method.equalsIgnoreCase("HEAD")) clientOut.write(body);
+	}
+
+	public void writeRemoteBody(String body) throws IOException {
+		remoteOut.writeBytes(body);
+	}
+	
+	public void writeRemoteBody(byte[] body) throws IOException {
+		remoteOut.write(body);
 	}
 	
 	
