@@ -15,13 +15,15 @@ import java.util.Hashtable;
 
 public class RequestWorker extends Thread {
 	
+	int id; // a unique number identifying this RequestWorker; used for logging
 	
-	int id;
+	String method; // HTTP method being used
+	String host; // hostname that our client is connecting to us at
 	
 	Socket clientSocket; // connection to client
-	BufferedReader clientIn; // client -> proxy stream
+	DataInputStream clientIn; // client -> proxy stream
 	DataOutputStream clientOut; // proxy -> client stream
-	String method; // HTTP method being used
+	Hashtable<String,String> clientHeaders; // headers received from client
 	
 	Socket remoteSocket; // connection to remote
 	DataInputStream remoteIn; // remote -> proxy stream
@@ -38,7 +40,7 @@ public class RequestWorker extends Thread {
 		try {
 			
 			// reader for client->proxy data
-			clientIn = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), Charset.forName("UTF-8")));
+			clientIn = new DataInputStream(clientSocket.getInputStream());
 			
 			// writer for proxy->client data
 			clientOut = new DataOutputStream(clientSocket.getOutputStream());
@@ -50,28 +52,29 @@ public class RequestWorker extends Thread {
 			method = "";
 			
 			try {
-				ArrayList<String> lines = new ArrayList<String>();
 				
-				String line;
-				while ((line = clientIn.readLine()) != null) {
-					
-					// break after two lines
-					if (line.equals("")) break;
-					
-					//System.out.println("C->P | "+line);
-					lines.add(line);
-				}
+				String request = clientIn.readLine();
 				
 				// ignore empty requests
-				if (lines.size() < 1) {
+				if (request == null) {
 					clientSocket.close();
 					return;
 				}
 				
-				// the first line of the request
-				String request = lines.get(0);
-				
 				logConnection(Node.CLIENT, Node.PROXY, request);
+				
+				
+				clientHeaders = new Hashtable<String,String>();
+				if (!readClientHeaders()) return;
+				
+				
+				host = clientHeaders.get("host");
+				if (host == null) {
+					logError("No host specified in request");
+					respondWithHtmlStatus(HttpStatus.BAD_REQUEST);
+					return;
+				}
+				
 				
 				String[] requestArgs = request.split(" ");
 				if (requestArgs.length != 3) {
@@ -99,6 +102,13 @@ public class RequestWorker extends Thread {
 				
 				// handle internal local addresses
 				if (requestUrl.startsWith("/")) {
+					
+					if (!Utils.ENABLE_INTERNAL_SERVER) {
+						logError("Tried to access internal server while disabled");
+						respondWithHtmlStatus(HttpStatus.SERVICE_UNAVAILABLE);
+						return;
+					}
+					
 					String[] requestParams = requestUrl.split("/");
 					
 					
@@ -206,8 +216,32 @@ public class RequestWorker extends Thread {
 			String remoteReq = method+" " + remotePath + " " + Utils.HTTP_VERSION;
 			logConnection(Node.PROXY, Node.REMOTE, remoteReq);
 			
+			// Host header required for http/1.1
 			remoteReq += Utils.httpHeader("Host", remoteHostname);
-			remoteReq += Utils.httpHeader("User-Agent", Utils.SERVER_NAME);
+			
+			// Via header to identify ourselves as a proxy
+			String viaPrefix = (clientHeaders.containsKey("Via")) ? (clientHeaders.get("Via") + ", ") : "";
+			remoteReq += Utils.httpHeader("Via", viaPrefix + "1.1 " + host);
+			
+			
+			// some headers should be copied from the C->P request to the P->R request
+			String[] copyHeaders = {
+					"Accept", 
+					"Accept-Charset", 
+					"Accept-Encoding", 
+					"Accept-Language", 
+					"Accept-Ranges",
+					"Authorization",
+					"DNT",
+					"From",
+					"User-Agent"
+					};
+			for (String copyKey : copyHeaders) {
+				if (clientHeaders.containsKey(copyKey)) {
+					remoteReq += Utils.httpHeader(copyKey, clientHeaders.get(copyKey));
+				}
+			}
+			
 			remoteReq += Utils.HTTP_HEADER_END;
 			
 			remoteOut.writeBytes(remoteReq);
@@ -334,13 +368,32 @@ public class RequestWorker extends Thread {
 	}
 	
 	/**
+	 * Reads headers from client until end of header block is reached
+	 * 
+	 * @return success
+	 */
+	public boolean readClientHeaders() throws IOException {
+		return readHeaders(false);
+	}
+	
+	/**
 	 * Reads headers from remote server until end of header block is reached
 	 * 
 	 * @return success
 	 */
 	public boolean readRemoteHeaders() throws IOException {
+		return readHeaders(true);
+	}
+	
+	/**
+	 * Reads headers from remote/client server until end of header block is reached
+	 * 
+	 * @param isRemote if true, remote; if false, client
+	 * @return success
+	 */
+	private boolean readHeaders(boolean isRemote) throws IOException {
 		String remoteLine;
-		while ((remoteLine = remoteIn.readLine()) != null) {
+		while ((remoteLine = (isRemote ? remoteIn : clientIn).readLine()) != null) {
 			
 			if (remoteLine.equals("")) break;
 			
@@ -351,7 +404,14 @@ public class RequestWorker extends Thread {
 				return false;
 			}
 			String headerKey = splitLine[0].toLowerCase();
-			remoteHeaders.put(headerKey, remoteLine.substring(headerKey.length()+1).trim());
+			String headerValue = remoteLine.substring(headerKey.length()+1).trim();
+			Hashtable<String,String> headers = (isRemote ? remoteHeaders : clientHeaders);
+			
+			// multiple of the same header may exist for comma-separated header types
+			if (headers.containsKey(headerKey)) {
+				headerValue = headers.get(headerKey) + ", " + headerValue;
+			}
+			headers.put(headerKey, headerValue);
 		}
 		return true;
 	}
@@ -442,7 +502,7 @@ public class RequestWorker extends Thread {
 	 * Helper method for all log methods (shouldn't be called directly)
 	 */
 	private void log(String message, boolean isError) {
-		message = id + " | " + message;
+		message = id + "\t| " + message;
 		if (!isError) Utils.log(message);
 		else Utils.logError(message);
 	}
