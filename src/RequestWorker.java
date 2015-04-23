@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.net.URLDecoder;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Enumeration;
@@ -110,6 +111,8 @@ public class RequestWorker extends Thread {
 				// handle internal local addresses
 				if (requestUrl.startsWith("/")) {
 					
+					requestUrl = URLDecoder.decode(requestUrl, "UTF-8");
+					
 					if (!Utils.ENABLE_INTERNAL_SERVER) {
 						logError("Tried to access internal server while disabled");
 						respondWithHtmlStatus(HttpStatus.SERVICE_UNAVAILABLE);
@@ -126,14 +129,15 @@ public class RequestWorker extends Thread {
 					if (requestParams.length <= 1) {
 						// a simple homepage
 						
-						respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
-								"Welcome to " + Utils.SERVER_NAME + "!",
-								
-								""
-								+ "<div class=\"col-md-12\">"
+						String body = "<div class=\"col-md-12\">"
 								+ "<p class=\"text-center\">Made by Hayden Schiff and Shir Maimon</p>"
-								+ "</div>"
-								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+								+ "</div>";
+						if (Utils.ENABLE_STATIC_FILES && Utils.ENABLE_DIRECTORY_INDEXING) {
+							body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/index\">View file index</a>"
+									+ "</p></div>";
+						}
+						body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
 								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
 								+ "</p></div>"
 								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
@@ -141,9 +145,12 @@ public class RequestWorker extends Thread {
 								+ "</p></div>"
 								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
 								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shut down the server</a>"
-								+ "</p></div>"
-								+ "<div class=\"clearfix\"></div>",
-								
+								+ "</p></div>";
+						body += "<div class=\"clearfix\"></div>";
+						
+						respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
+								"Welcome to " + Utils.SERVER_NAME + "!",
+								body,
 								".page-header h1, footer { text-align:center; }"
 						));
 						return;
@@ -192,11 +199,49 @@ public class RequestWorker extends Thread {
 					} else {
 						// get file from local filesystem
 						
-						File file = new File("static" + requestUrl);
-						
-						// we don't do indexing
-						if (file.isDirectory()) {
+						if (!Utils.ENABLE_STATIC_FILES) {
 							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+							return;
+						}
+						
+						if (requestUrl.equals("/index")) requestUrl = "/";
+						
+						File file = new File(Utils.DOCUMENT_ROOT + requestUrl);
+						
+						// return a folder index if it's a directory
+						if (file.isDirectory()) {
+							
+							if (!Utils.ENABLE_DIRECTORY_INDEXING) {
+								respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+								return;
+							}
+							
+							if (!requestUrl.endsWith("/")) {
+								respondRedirect(requestUrl +"/");
+							}
+							
+							File[] contents = file.listFiles();
+							
+							String body = "<p><a href=\"../\">&laquo; Go up a level</a></p>";
+							
+							if (contents.length > 0) {
+								body += "<ul>";
+								for (File f : contents) {
+									String path = f.getName();
+									if (f.isDirectory()) path += "/";
+									body += "<li>"
+											+ "<a href=\"" + path + "\">" + path + "</a>"
+											+ "</li>";
+								}
+								body += "</ul>";
+							} else {
+								body += "<p>This directory is empty.</p>";
+							}
+
+							respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
+									"Index of " + requestUrl, body, ""
+							));
+							
 							return;
 						}
 						// not found if file doesn't exist
@@ -632,6 +677,21 @@ public class RequestWorker extends Thread {
 		sendHeader("Content-Length", String.valueOf(body.length()));
 		sendHeader("Content-Type", "text/html");
 		sendHeader("Allow", allowedMethods);
+		endHeader();
+		writeClientBody(body);
+		endResponse();
+	}
+
+	/**
+	 * Tells client to look somewhere else for the resource they requested
+	 */
+	public void respondRedirect(String location) throws IOException {
+		HttpStatus status = HttpStatus.MOVED_PERMANENTLY;
+		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
+		beginResponse(status);
+		sendHeader("Content-Length", String.valueOf(body.length()));
+		sendHeader("Content-Type", "text/html");
+		sendHeader("Location", location);
 		endHeader();
 		writeClientBody(body);
 		endResponse();

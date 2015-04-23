@@ -5,12 +5,24 @@ import java.util.Locale;
 
 public class Utils {
 	
-	// name used for self-identification
-	final static String SERVER_NAME = "AwesomeProxy";
-	
-	// accept requests to local addresses?
+	/**
+	 * INTERNAL SERVER CONFIGURATION
+	 */
+	// accept requests to internal server addresses?
 	final static boolean ENABLE_INTERNAL_SERVER = true;
+	// accept requests to static files on the internal server?
+	final static boolean ENABLE_STATIC_FILES = true;
+	// show directory listings for static files on the internal server?
+	final static boolean ENABLE_DIRECTORY_INDEXING = true;
+	// relative or absolute path to root directory for static files
+	final static String DOCUMENT_ROOT = "static";
+	// when serving local static files, how many bytes of the file should be buffered at a time?
+	final static int FILE_BUFFER_SIZE = 1024;
 	
+	
+	/**
+	 * LOGGING CONFIGURATION
+	 */
 	// should we log notices/errors?
 	final static boolean LOG_MESSAGES = true;
 	final static boolean LOG_ERRORS = true;
@@ -21,14 +33,23 @@ public class Utils {
 	final static boolean LOG_REQUEST_CLIENT_CONNECTIONS = true; // log requests w/client? (only if LOG_REQUEST_MESSAGES)
 	final static boolean LOG_REQUEST_REMOTE_CONNECTIONS = true; // log requests w/remote? (only if LOG_REQUEST_MESSAGES)
 	
-	// when serving local static files, how many bytes of the file should be buffered at a time?
-	final static int FILE_BUFFER_SIZE = 1024;
+	
+	/**
+	 * MISCELLANEOUS CONFIGURATION
+	 */
+	// name used for self-identification
+	final static String SERVER_NAME = "AwesomeProxy";
 	
 	// The assignment said to only accept GET requests or return "Bad Method".
 	// We also accept HEAD and POST, and we return the correct response of
 	// "Not Implemented" for unsupported methods. To disable these
 	// behaviors, set this boolean to true.
 	final static boolean STICK_TO_THE_SCRIPT = false;
+	
+	
+	
+	
+	
 	
 	// some strings that get used a lot, for convenience
 	final static String HTTP_VERSION = "HTTP/1.1";
