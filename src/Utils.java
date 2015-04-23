@@ -8,7 +8,7 @@ public class Utils {
 	// name used for self-identification
 	final static String SERVER_NAME = "AwesomeProxy";
 	
-	// accept requests on the local/internal server?
+	// accept requests to local addresses?
 	final static boolean ENABLE_INTERNAL_SERVER = true;
 	
 	// should we log notices/errors?
@@ -21,13 +21,13 @@ public class Utils {
 	final static boolean LOG_REQUEST_CLIENT_CONNECTIONS = true; // log requests w/client? (only if LOG_REQUEST_MESSAGES)
 	final static boolean LOG_REQUEST_REMOTE_CONNECTIONS = true; // log requests w/remote? (only if LOG_REQUEST_MESSAGES)
 	
-	// how many bytes of a file should the file server read at a time?
+	// when serving local static files, how many bytes of the file should be buffered at a time?
 	final static int FILE_BUFFER_SIZE = 1024;
 	
 	// The assignment said to only accept GET requests or return "Bad Method".
 	// We also accept HEAD and POST, and we return the correct response of
-	// "Not Implemented" for unsupported methods. To disable this
-	// behavior, set this boolean to true.
+	// "Not Implemented" for unsupported methods. To disable these
+	// behaviors, set this boolean to true.
 	final static boolean STICK_TO_THE_SCRIPT = false;
 	
 	// some strings that get used a lot, for convenience

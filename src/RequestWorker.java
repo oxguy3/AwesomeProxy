@@ -289,13 +289,15 @@ public class RequestWorker extends Thread {
 			
 			// Via header to identify ourselves as a proxy
 			String viaPrefix = (clientHeaders.containsKey("Via")) ? (clientHeaders.get("Via") + ", ") : "";
-			remoteReq += Utils.httpHeader("Via", viaPrefix + "1.1 " + host);
+			remoteReq += Utils.httpHeader("Via", viaPrefix + "1.1 " + Utils.SERVER_NAME);
 			
 			// must pass length for POST
 			if (method.equalsIgnoreCase("POST")) {
 				String contentLength = (clientHeaders.containsKey("Content-Length")) ? 
 						(clientHeaders.get("Content-Length") + ", ") : String.valueOf(clientBody.length);
 				remoteReq += Utils.httpHeader("Content-Length", contentLength);
+				
+				log(Utils.httpHeader("Content-Length", contentLength));
 			}
 			
 			
@@ -307,14 +309,24 @@ public class RequestWorker extends Thread {
 					"Accept-Language", 
 					"Accept-Ranges",
 					"Authorization",
+					"Cache-Control",
+					"Content-Type",
+					"Cookie",
 					"DNT", //do not track flag
 					"From",
-					"User-Agent",
-					"Content-Type"
+					"Referer",
+					"User-Agent"
 					};
 			for (String copyKey : copyHeaders) {
-				if (clientHeaders.containsKey(copyKey)) {
-					remoteReq += Utils.httpHeader(copyKey, clientHeaders.get(copyKey));
+				if (clientHeaders.containsKey(copyKey.toLowerCase())) {
+					
+					// multiple headers of the same name are separated
+					// by CRLFs, so we need to split them back out
+					String valueStr = clientHeaders.get(copyKey.toLowerCase());
+					String[] values = valueStr.split(Utils.CRLF);
+					for (String value : values) {
+						remoteReq += Utils.httpHeader(copyKey, value);
+					}
 				}
 			}
 			
@@ -322,7 +334,9 @@ public class RequestWorker extends Thread {
 			
 			writeRemoteBody(remoteReq);
 			
-			if (method.equalsIgnoreCase("POST")) writeRemoteBody(clientBody);
+			if (method.equalsIgnoreCase("POST")) {
+				writeRemoteBody(clientBody);
+			}
 			
 			
 			remoteHeaders = new Hashtable<String,String>();
@@ -352,7 +366,14 @@ public class RequestWorker extends Thread {
 				Enumeration<String> keys = remoteHeaders.keys();
 				while (keys.hasMoreElements()) {
 					String key = keys.nextElement();
-					clientOut.writeBytes(Utils.httpHeader(key, remoteHeaders.get(key)));
+					
+					// multiple headers of the same name are separated
+					// by CRLFs, so we need to split them back out
+					String valueStr = remoteHeaders.get(key);
+					String[] values = valueStr.split(Utils.CRLF);
+					for (String value : values) {
+						clientOut.writeBytes(Utils.httpHeader(key, value));
+					}
 				}
 				clientOut.writeBytes(Utils.HTTP_HEADER_END);
 				
@@ -418,7 +439,7 @@ public class RequestWorker extends Thread {
 			
 			// multiple of the same header may exist for comma-separated header types
 			if (headers.containsKey(headerKey)) {
-				headerValue = headers.get(headerKey) + ", " + headerValue;
+				headerValue = headers.get(headerKey) + Utils.CRLF + headerValue;
 			}
 			headers.put(headerKey, headerValue);
 		}
