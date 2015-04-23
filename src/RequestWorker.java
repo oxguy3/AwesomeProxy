@@ -133,17 +133,18 @@ public class RequestWorker extends Thread {
 								+ "<div class=\"col-md-12\">"
 								+ "<p class=\"text-center\">Made by Hayden Schiff and Shir Maimon</p>"
 								+ "</div>"
-								+ "<div class=\"col-sm-4\">"
+								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
 								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
-								+ "</div>"
-								+ "<div class=\"col-sm-4\">"
+								+ "</p></div>"
+								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
 								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/off\">Disable proxy service</a>"
-								+ "</div>"
-								+ "<div class=\"col-sm-4\">"
-								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shutdown the server</a>"
-								+ "</div>",
+								+ "</p></div>"
+								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shut down the server</a>"
+								+ "</p></div>"
+								+ "<div class=\"clearfix\"></div>",
 								
-								".page-header h1 { text-align:center; }"
+								".page-header h1, footer { text-align:center; }"
 						));
 						return;
 						

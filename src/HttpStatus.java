@@ -51,7 +51,7 @@ public enum HttpStatus {
 	INTERNAL_SERVER_ERROR	(500, "Internal Server Error",
 			"An unknown error occurred."),
 	NOT_IMPLEMENTED			(501, "Not Implemented",
-			"This server only supports the GET and HEAD methods."),
+			"This server only supports GET, HEAD, and POST requests."),
 	BAD_GATEWAY				(502, "Bad Gateway",
 			"The remote server failed to return a valid response."),
 	SERVICE_UNAVAILABLE		(503, "Service Unavailable",
@@ -66,10 +66,8 @@ public enum HttpStatus {
 	public final String description;
 	
 	HttpStatus(int code, String name) {
-        this.code = code;
-        this.name = name;
-        this.description = "See <a href=\"http://httpstatus.es/" 
-				+ code + "\">this page</a> for more information about this status message.";
+		this(code, name, "See <a href=\"http://httpstatus.es/" 
+				+ code + "\">this page</a> for more information about this status message.");
     }
 	
 	HttpStatus(int code, String name, String description) {
