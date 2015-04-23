@@ -222,6 +222,7 @@ public class RequestWorker extends Thread {
 							sendHeader("Content-Type", fileContentType);
 						}
 						
+						// for simplicity's sake, we'll use chunked encoding every time
 						sendHeader("Transfer-Encoding", "chunked");
 						endHeader();
 
@@ -231,7 +232,8 @@ public class RequestWorker extends Thread {
 							writeClientBody(Arrays.copyOf(fileBuffer, fileBufferSize));
 							writeClientBody(Utils.CRLF);
 						}
-						writeClientBody("0"+Utils.CRLF+Utils.CRLF);
+						// signal the end of chunks
+						writeClientBody("0" + Utils.CRLF + Utils.CRLF);
 						endResponse();
 						
 						fileIn.close();
@@ -296,8 +298,6 @@ public class RequestWorker extends Thread {
 				String contentLength = (clientHeaders.containsKey("Content-Length")) ? 
 						(clientHeaders.get("Content-Length") + ", ") : String.valueOf(clientBody.length);
 				remoteReq += Utils.httpHeader("Content-Length", contentLength);
-				
-				log(Utils.httpHeader("Content-Length", contentLength));
 			}
 			
 			
