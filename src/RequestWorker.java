@@ -137,15 +137,17 @@ public class RequestWorker extends Thread {
 									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/index\">View file index</a>"
 									+ "</p></div>";
 						}
-						body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
-								+ "</p></div>"
-								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/off\">Disable proxy service</a>"
-								+ "</p></div>"
-								+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shut down the server</a>"
-								+ "</p></div>";
+						if (Utils.ENABLE_INTERNAL_ACTIONS) {
+							body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
+									+ "</p></div>"
+									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/off\">Disable proxy service</a>"
+									+ "</p></div>"
+									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shut down the server</a>"
+									+ "</p></div>";
+						}
 						body += "<div class=\"clearfix\"></div>";
 						
 						respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
@@ -158,6 +160,11 @@ public class RequestWorker extends Thread {
 					} else if (requestParams[1].equals("exit")) {
 						// command to shutdown the server
 						
+						if (!Utils.ENABLE_INTERNAL_ACTIONS) {
+							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+							return;
+						}
+						
 						ProxyServer.isAlive = false;
 						respondWithMessage(
 								HttpStatus.ACCEPTED,
@@ -169,6 +176,11 @@ public class RequestWorker extends Thread {
 						
 					} else if (requestParams[1].equals("proxy") && requestParams.length > 2) {
 						// commands to turn proxy service on/off
+						
+						if (!Utils.ENABLE_INTERNAL_ACTIONS) {
+							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+							return;
+						}
 						
 						if (requestParams[2].equals("on")) {
 							ProxyServer.isProxyActive = true;
@@ -222,7 +234,8 @@ public class RequestWorker extends Thread {
 							
 							File[] contents = file.listFiles();
 							
-							String body = "<p><a href=\"../\">&laquo; Go up a level</a></p>";
+							String body = "<div class=\"col-md-12\">"
+									+ "<p><a href=\"../\">&laquo; Go up a level</a></p>";
 							
 							if (contents.length > 0) {
 								body += "<ul>";
@@ -237,6 +250,8 @@ public class RequestWorker extends Thread {
 							} else {
 								body += "<p>This directory is empty.</p>";
 							}
+							
+							body += "</div>";
 
 							respondWithHtml(HttpStatus.OK, Utils.getSimpleHtml(
 									"Index of " + requestUrl, body, ""
