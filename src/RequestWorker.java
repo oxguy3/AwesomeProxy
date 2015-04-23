@@ -116,6 +116,10 @@ public class RequestWorker extends Thread {
 						return;
 					}
 					
+					if (method.equalsIgnoreCase("POST")) {
+						respondMethodNotAllowed("GET, HEAD");
+					}
+					
 					String[] requestParams = requestUrl.split("/");
 					
 					
@@ -334,77 +338,6 @@ public class RequestWorker extends Thread {
 				
 				if (method != "HEAD") {
 					if (!readRemoteBody()) return;
-					/*if (remoteHeaders.containsKey("content-length")) {
-						// remote server told us from the get-go how much data to
-						// expect, so just read exactly that many bytes
-						
-						String contentLengthStr = remoteHeaders.get("content-length");
-						int contentLength = 0;
-						try {
-							contentLength = Integer.parseInt(contentLengthStr);
-						} catch (NumberFormatException nfe) {
-							logError("Couldn't parse content length from remote server");
-							respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-							return;
-						}
-						
-						remoteBody = new byte[contentLength];
-						for (int i = 0; i < contentLength; i++) {
-							remoteBody[i] = (byte) remoteIn.read();
-						}
-						
-						
-					} else if (remoteHeaders.containsKey("transfer-encoding")) {
-						// remote server is sending data in chunks, so read all the chunks
-						
-						// we do not support any transfer-encoding methods besides chunked
-						if (!remoteHeaders.get("transfer-encoding").equalsIgnoreCase("chunked")) {
-							logError("Unknown transfer-encoding method: " + remoteHeaders.get("transfer-encoding"));
-							respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-							return;
-						}
-						
-						String chunkHead;
-						while ((chunkHead = remoteIn.readLine()) != null) {
-							
-							if (chunkHead.equals("0") || chunkHead.equals("")) break;
-	
-							// get the size of this chunk
-							int chunkSize = 0;
-							try {
-								chunkSize = Integer.parseInt(chunkHead.split(";")[0], 16);
-							} catch (NumberFormatException e) {
-								logError("Couldn't parse chunk size from remote server");
-								respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-								return;
-							}
-							
-							// we need to expand the byte array to accommodate this chunk
-							int oldLength = remoteBody.length;
-							int newLength = oldLength + chunkSize;
-							
-							// add this chunk to the byte array
-							remoteBody = Arrays.copyOf(remoteBody, newLength);
-							for (int i = oldLength; i < newLength; i++) {
-								remoteBody[i] = (byte) remoteIn.read();
-							}
-							
-							remoteIn.skipBytes(2); // skip the CRLF at the end of the chunk
-						}
-						
-						remoteHeaders.remove("transfer-encoding");
-						remoteHeaders.put("content-length", String.valueOf(remoteBody.length));
-						
-						// we've reached the end of the chunks, so add footers to our headers array if any exist
-						if (!readRemoteHeaders()) return;
-						
-						
-					} else {
-						// remote server is sending data using some voodoo magic we don't understand
-						logError("Unknown data tranfer method");
-						respondWithHtmlStatus(HttpStatus.BAD_GATEWAY);
-						return;
-					}*/
 				}
 				
 				
@@ -499,7 +432,13 @@ public class RequestWorker extends Thread {
 	public boolean readRemoteBody() throws IOException {
 		return readBody(true);
 	}
-	
+
+	/**
+	 * Reads body from remote/client server until end of body is reached
+	 * 
+	 * @param isRemote if true, remote; if false, client
+	 * @return success
+	 */
 	private boolean readBody(boolean isRemote) throws IOException {
 		
 		Hashtable<String,String> headers = isRemote ? remoteHeaders : clientHeaders;
@@ -659,6 +598,21 @@ public class RequestWorker extends Thread {
 	public void respondWithHtmlStatus(HttpStatus status) throws IOException {
 		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
 		respondWithHtml(status, body);
+	}
+
+	/**
+	 * Responds to client that tried to use a method that isn't allowed
+	 */
+	public void respondMethodNotAllowed(String allowedMethods) throws IOException {
+		HttpStatus status = HttpStatus.METHOD_NOT_ALLOWED;
+		String body = Utils.getSimpleHtmlMessage(status.getFullName(), status.description);
+		beginResponse(status);
+		sendHeader("Content-Length", String.valueOf(body.length()));
+		sendHeader("Content-Type", "text/html");
+		sendHeader("Allow", allowedMethods);
+		endHeader();
+		writeClientBody(body);
+		endResponse();
 	}
 
 	public void writeClientBody(String body) throws IOException {
