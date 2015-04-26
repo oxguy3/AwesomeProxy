@@ -132,20 +132,24 @@ public class RequestWorker extends Thread {
 						String body = "<div class=\"col-md-12\">"
 								+ "<p class=\"text-center\">Made by Hayden Schiff and Shir Maimon</p>"
 								+ "</div>";
+						body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+								+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy.pac\">Download proxy auto-config file</a>"
+								+ "</p></div>";
+						if (Utils.ENABLE_INTERNAL_ACTIONS) {
+							body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/action/proxyon\">Enable proxy service</a>"
+									+ "</p></div>"
+									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/action/proxyoff\">Disable proxy service</a>"
+									+ "</p></div>"
+									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
+									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/action/exit\">Shut down the server</a>"
+									+ "</p></div>";
+						}
+
 						if (Utils.ENABLE_STATIC_FILES && Utils.ENABLE_DIRECTORY_INDEXING) {
 							body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
 									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/index\">View file index</a>"
-									+ "</p></div>";
-						}
-						if (Utils.ENABLE_INTERNAL_ACTIONS) {
-							body += "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/on\">Enable proxy service</a>"
-									+ "</p></div>"
-									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/proxy/off\">Disable proxy service</a>"
-									+ "</p></div>"
-									+ "<div class=\"col-sm-6 col-sm-offset-3\"><p>"
-									+ "<a class=\"btn btn-primary btn-lg btn-block\" href=\"/exit\">Shut down the server</a>"
 									+ "</p></div>";
 						}
 						body += "<div class=\"clearfix\"></div>";
@@ -157,32 +161,25 @@ public class RequestWorker extends Thread {
 						));
 						return;
 						
-					} else if (requestParams[1].equals("exit")) {
-						// command to shutdown the server
+					} else if (requestParams[1].equals("action") && requestParams.length > 2) {
+						// actions for controlling the server
 						
 						if (!Utils.ENABLE_INTERNAL_ACTIONS) {
 							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
 							return;
 						}
 						
-						ProxyServer.isAlive = false;
-						respondWithMessage(
-								HttpStatus.ACCEPTED,
-								"Exit command received",
-								"The server is no longer accepting new connections, and "
-								+ "will shutdown after all active connections are closed."
-						);
-						return;
-						
-					} else if (requestParams[1].equals("proxy") && requestParams.length > 2) {
-						// commands to turn proxy service on/off
-						
-						if (!Utils.ENABLE_INTERNAL_ACTIONS) {
-							respondWithHtmlStatus(HttpStatus.FORBIDDEN);
+						if (requestParams.length == 3 && requestParams[2].equals("exit")) { // shut down the server
+							ProxyServer.isAlive = false;
+							respondWithMessage(
+									HttpStatus.ACCEPTED,
+									"Exit command received",
+									"The server is no longer accepting new connections, and "
+									+ "will shutdown after all active connections are closed."
+							);
 							return;
-						}
-						
-						if (requestParams[2].equals("on")) {
+							
+						} else if (requestParams.length == 3 && requestParams[2].equals("proxyon")) { // enable proxy
 							ProxyServer.isProxyActive = true;
 							respondWithMessage(
 									HttpStatus.ACCEPTED,
@@ -191,7 +188,7 @@ public class RequestWorker extends Thread {
 							);
 							return;
 							
-						} else if (requestParams[2].equals("off")) {
+						} else if (requestParams.length == 3 && requestParams[2].equals("proxyoff")) { // disable proxy
 							ProxyServer.isProxyActive = false;
 							respondWithMessage(
 									HttpStatus.ACCEPTED,
@@ -200,16 +197,34 @@ public class RequestWorker extends Thread {
 							);
 							return;
 							
-						} 
+						}
 						
-					} else if (requestParams[1].equals("teapot")) {
-						// i couldn't resist
+					} else if (requestParams.length == 2 && requestParams[1].equals("teapot")) { // i couldn't resist
 						
 						respondWithHtmlStatus(HttpStatus.IM_A_TEAPOT);
 						return;
 						
-					} else {
-						// get file from local filesystem
+						
+					} else if (requestParams.length == 2 && requestParams[1].equals("proxy.pac")) { // auto config file for proxy
+						
+						// many browsers and OSes let you specify the URL of an auto-config
+						// file like this, to simplify the configuration of the proxy
+						
+						String body = "function FindProxyForURL(url, host)"
+								+ "{"
+								+ "return \"PROXY " + host + "; DIRECT\";"
+								+ "}";
+						
+						beginResponse(HttpStatus.OK);
+						sendHeader("Content-Length", String.valueOf(body.length()));
+						sendHeader("Content-Type", "application/x-ns-proxy-autoconfig");
+						endHeader();
+						writeClientBody(body);
+						endResponse();
+						return;
+						
+						
+					} else { // get file from local filesystem
 						
 						if (!Utils.ENABLE_STATIC_FILES) {
 							respondWithHtmlStatus(HttpStatus.FORBIDDEN);

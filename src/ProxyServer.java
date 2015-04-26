@@ -10,10 +10,11 @@ public class ProxyServer extends Thread {
 	
 	// should the server respond to proxy HTTP requests?
 	volatile static boolean isProxyActive;
+	
+	static int port = 8080;
 
 	public static void main(String[] args) {
 		
-		int port = 8080;
 		if (args.length > 0) {
 			String portStr = args[0];
 			port = Integer.parseInt(portStr);

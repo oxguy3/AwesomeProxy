@@ -21,7 +21,7 @@ public class Utils {
 	// show directory listings for static files on the internal server?
 	final static boolean ENABLE_DIRECTORY_INDEXING = true;
 	
-	// relative or absolute path to root directory for static files
+	// a relative or absolute path to root directory for static files
 	final static String DOCUMENT_ROOT = "static";
 	
 	// when serving local static files, how many bytes of the file should be buffered at a time?
