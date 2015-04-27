@@ -62,7 +62,6 @@ public class Utils {
 	// some strings that get used a lot, for convenience
 	final static String HTTP_VERSION = "HTTP/1.1";
 	final static String CRLF = "\r\n";
-	final static String LF = "\n";
 	final static String HTTP_HEADER_END = CRLF + CRLF;
 	
 	/**

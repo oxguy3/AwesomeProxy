@@ -82,8 +82,8 @@ public class RequestWorker extends Thread {
 						|| (method.equalsIgnoreCase("HEAD") && !Utils.STICK_TO_THE_SCRIPT)
 						|| (method.equalsIgnoreCase("POST") && !Utils.STICK_TO_THE_SCRIPT))) {
 					logError("Invalid or unimplemented HTTP method");
-					respondWithHtmlStatus(
-							(Utils.STICK_TO_THE_SCRIPT) ? (HttpStatus.METHOD_NOT_ALLOWED) : (HttpStatus.NOT_IMPLEMENTED));
+					respondWithHtmlStatus((Utils.STICK_TO_THE_SCRIPT) ? 
+							(HttpStatus.METHOD_NOT_ALLOWED) : (HttpStatus.NOT_IMPLEMENTED));
 					return;
 				}
 				// force http/1.1
@@ -358,7 +358,7 @@ public class RequestWorker extends Thread {
 			remoteOut = new DataOutputStream(remoteSocket.getOutputStream());
 			remoteIn = new DataInputStream(remoteSocket.getInputStream());
 			
-			String remoteReq = method+" " + remotePath + " " + Utils.HTTP_VERSION;
+			String remoteReq = method + " " + remotePath + " " + Utils.HTTP_VERSION;
 			logConnection(Node.PROXY, Node.REMOTE, remoteReq);
 			
 			// Host header required for http/1.1
@@ -436,7 +436,7 @@ public class RequestWorker extends Thread {
 				remoteSocket.close();
 				
 				
-
+				logConnection(Node.PROXY, Node.CLIENT, remoteResponseLine);
 				clientOut.writeBytes(remoteResponseLine);
 				Enumeration<String> keys = remoteHeaders.keys();
 				while (keys.hasMoreElements()) {
